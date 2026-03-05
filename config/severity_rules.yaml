@@ -1,0 +1,16 @@
+categories:
+  aws_keys: {severity: CRITICAL, sla_hours: 4}
+  private_keys: {severity: CRITICAL, sla_hours: 4}
+  database: {severity: CRITICAL, sla_hours: 4}
+  github_tokens: {severity: HIGH, sla_hours: 8}
+  cloud_tokens: {severity: HIGH, sla_hours: 8}
+  credentials: {severity: HIGH, sla_hours: 12}
+  session_cookies: {severity: HIGH, sla_hours: 12}
+  cve: {severity: MEDIUM, sla_hours: 48}
+  hashes: {severity: MEDIUM, sla_hours: 48}
+  urls: {severity: MEDIUM, sla_hours: 48}
+  bitcoin: {severity: MEDIUM, sla_hours: 48}
+  ipv4: {severity: LOW, sla_hours: 72}
+  ipv6: {severity: LOW, sla_hours: 72}
+  domains: {severity: LOW, sla_hours: 72}
+  emails: {severity: LOW, sla_hours: 72}

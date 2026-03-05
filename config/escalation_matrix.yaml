@@ -1,0 +1,10 @@
+escalation_rules:
+  tier_1: {trigger: sla_50_percent, actions: [notify_team_lead], applies_to: [CRITICAL, HIGH]}
+  tier_2: {trigger: sla_75_percent, actions: [notify_manager, create_jira_ticket], applies_to: [CRITICAL, HIGH, MEDIUM]}
+  tier_3: {trigger: sla_100_percent, actions: [notify_ciso, pagerduty], applies_to: [CRITICAL, HIGH]}
+sla_overrides:
+  kev_always_critical: {condition: "in CISA KEV", override_severity: CRITICAL, sla_hours: 4}
+  ransomware_critical: {condition: "source is ransomware_leak_site", override_severity: CRITICAL, sla_hours: 4}
+  exploit_for_sale: {condition: "text contains exploit for sale or 0day", override_severity: CRITICAL, sla_hours: 8}
+  credential_dump: {condition: "credential count > 100", override_severity: HIGH, sla_hours: 8}
+  critical_asset: {condition: "matched asset is critical", boost: +1}

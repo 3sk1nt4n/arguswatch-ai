@@ -1,0 +1,5 @@
+tiers:
+  CRITICAL: {sla_hours: 4, tier_1: {at_percent: 50, action: notify_team_lead}, tier_2: {at_percent: 75, action: notify_manager}, tier_3: {at_percent: 100, action: notify_director}}
+  HIGH: {sla_hours: 12, tier_1: {at_percent: 50, action: notify_team_lead}, tier_2: {at_percent: 75, action: notify_manager}, tier_3: {at_percent: 100, action: notify_director}}
+  MEDIUM: {sla_hours: 48, tier_1: {at_percent: 75, action: notify_analyst}, tier_2: {at_percent: 100, action: notify_team_lead}, tier_3: {at_percent: 150, action: notify_manager}}
+  LOW: {sla_hours: 72, tier_1: {at_percent: 100, action: notify_analyst}, tier_2: {at_percent: 150, action: notify_team_lead}, tier_3: {at_percent: 200, action: auto_close}}

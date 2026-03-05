@@ -1,0 +1,11 @@
+collectors:
+  cisa_kev: {enabled: true, interval_hours: 6, status: implemented}
+  nvd_cve: {enabled: false, interval_hours: 4, status: planned}
+  first_epss: {enabled: false, interval_hours: 24, status: planned}
+  abuse_ch_threatfox: {enabled: false, interval_hours: 2, status: planned}
+  virustotal: {enabled: false, interval_hours: 1, requires_key: VIRUSTOTAL_API_KEY, status: planned}
+  abuseipdb: {enabled: false, interval_hours: 4, requires_key: ABUSEIPDB_API_KEY, status: planned}
+  shodan: {enabled: false, interval_hours: 12, requires_key: SHODAN_API_KEY, status: planned}
+  tor_paste_sites: {enabled: false, interval_hours: 1, status: planned}
+  ransomware_leak_sites: {enabled: false, interval_hours: 2, status: planned}
+retry_policy: {default_max: 3, default_delay_sec: 60, backoff_multiplier: 2}
