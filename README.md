@@ -5,7 +5,7 @@
 
 # ArgusWatch AI-Agentic Threat Intelligence Platform
 
-### v16.4.6 — Multi-Tenant MSSP Platform | 47 Collectors | 86 IOC Types | 110 Tests
+### v16.4.6 - Multi-Tenant MSSP Platform | 47 Collectors | 86 IOC Types | 110 Tests
 
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://python.org)
 [![Docker](https://img.shields.io/badge/docker-compose-2496ED.svg)](https://docker.com)
