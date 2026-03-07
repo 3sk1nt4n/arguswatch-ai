@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     AI_ACTIVE_PROVIDER: str = "ollama"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
-    ANTHROPIC_MODEL: str = "claude-sonnet-4-5-20250929"    # Best balance of intelligence + speed
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"    # Best balance of intelligence + speed
     OPENAI_MODEL: str = "gpt-4o"                            # Most capable GPT model
     GOOGLE_AI_API_KEY: str = ""
     GOOGLE_AI_MODEL: str = "gemini-2.5-pro"                  # Most capable Gemini model

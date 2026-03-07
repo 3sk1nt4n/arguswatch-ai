@@ -1,6 +1,6 @@
 @echo off
 echo ===================================================
-echo   ArgusWatch AI v16.4.1 - Fresh Start (Windows)
+echo   ArgusWatch AI v16.4.6 - Fresh Start (Windows)
 echo   Solvent CyberSecurity LLC
 echo   WARNING: This destroys ALL data and rebuilds
 echo ===================================================
@@ -94,7 +94,7 @@ docker exec arguswatch-postgres psql -U arguswatch -d arguswatch -c "INSERT INTO
 REM Final stats
 echo.
 echo ===================================================
-echo   ArgusWatch AI v16.4.1 - READY
+echo   ArgusWatch AI v16.4.6 - READY
 echo ===================================================
 echo.
 echo   Stats:

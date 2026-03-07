@@ -54,23 +54,53 @@ logger = logging.getLogger("arguswatch.ai_orchestrator")
 
 
 def _orchestration_enabled() -> bool:
+    """V16.4.6: Ollama is now the DEFAULT orchestrator.
+    Cloud APIs (Anthropic/OpenAI) are optional fast-path upgrades.
+    """
     return bool(
         getattr(settings, "ANTHROPIC_API_KEY", "") or
-        getattr(settings, "OPENAI_API_KEY", "")
-        # Ollama excluded from orchestration - too slow for per-detection calls
-        # Use Ollama only for the chat agent, not the pipeline
+        getattr(settings, "OPENAI_API_KEY", "") or
+        getattr(settings, "OLLAMA_URL", "")  # Ollama now included
     )
 
 
 def _provider() -> str:
-    """Orchestrator uses Anthropic or OpenAI only - same exclusion as pipeline hooks.
-    Ollama is too slow (120s timeout) for per-detection orchestration calls.
-    Returns 'none' if no fast provider is configured."""
+    """Read the active provider from frontend selection (Redis/settings).
+    Falls back to env var priority if nothing selected.
+    Respects the header buttons: Qwen / Claude / GPT / Gemini."""
+    # 1. Check if user selected a provider via dashboard header/settings
+    try:
+        from arguswatch.services.ai_pipeline_hooks import _get_active_provider_from_redis
+        selected = _get_active_provider_from_redis()
+        if selected and selected != "auto":
+            # Verify the selected provider is actually usable
+            if selected == "anthropic" and getattr(settings, "ANTHROPIC_API_KEY", ""):
+                return "anthropic"
+            if selected == "openai" and getattr(settings, "OPENAI_API_KEY", ""):
+                return "openai"
+            if selected == "google" and getattr(settings, "GOOGLE_AI_KEY", ""):
+                return "google"
+            if selected == "ollama" and getattr(settings, "OLLAMA_URL", ""):
+                return "ollama"
+            # Selected provider has no key — fall through to auto
+    except Exception:
+        pass
+    # 2. Auto: first available (fastest first)
     if getattr(settings, "ANTHROPIC_API_KEY", ""):
         return "anthropic"
     if getattr(settings, "OPENAI_API_KEY", ""):
         return "openai"
+    if getattr(settings, "OLLAMA_URL", ""):
+        return "ollama"
     return "none"
+
+
+def _max_iterations() -> int:
+    """Ollama gets fewer iterations (slower per call). Cloud APIs get full autonomy."""
+    prov = _provider()
+    if prov == "ollama":
+        return 4   # 4 × ~30s = ~2 min max per detection
+    return 12      # Cloud (Anthropic/OpenAI/Google): 12 × ~2s = ~24s max
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -562,7 +592,7 @@ async def ai_orchestrate_detection(detection_id: int) -> dict:
 
     tools_called = []
     tool_results = []
-    max_iterations = 12
+    max_iterations = _max_iterations()
 
     try:
         if provider == "anthropic":
@@ -575,6 +605,16 @@ async def ai_orchestrate_detection(detection_id: int) -> dict:
             _call_llm = lambda msgs: _call_openai(msgs, ORCHESTRATOR_SCHEMAS)
             def _append_tool_results(msgs, tc_list, results_list):
                 pass  # results already appended per-tool below
+        elif provider == "ollama":
+            from arguswatch.agent.agent_core import _call_ollama
+            _call_llm = lambda msgs: _call_ollama(msgs, ORCHESTRATOR_SCHEMAS)
+            def _append_tool_results(msgs, tc_list, results_list):
+                msgs.append({"role": "user", "content": results_list})
+        elif provider == "google":
+            from arguswatch.agent.agent_core import _call_google
+            _call_llm = lambda msgs: _call_google(msgs, ORCHESTRATOR_SCHEMAS)
+            def _append_tool_results(msgs, tc_list, results_list):
+                msgs.append({"role": "user", "content": results_list})
         else:
             return None
 
@@ -596,6 +636,15 @@ async def ai_orchestrate_detection(detection_id: int) -> dict:
             if provider == "anthropic":
                 messages.append({"role": "assistant", "content": response["raw_content"]})
                 ant_results = []
+            elif provider in ("ollama", "google"):
+                # Ollama + Google use same response interface
+                _compat_msg = {"role": "assistant", "content": response["text"] or ""}
+                if response["tool_calls"]:
+                    _compat_msg["tool_calls"] = [{
+                        "id": tc["id"], "type": "function",
+                        "function": {"name": tc["name"], "arguments": json.dumps(tc["args"])}
+                    } for tc in response["tool_calls"]]
+                messages.append(_compat_msg)
             else:
                 messages.append({"role": "assistant", **response["raw_message"]})
 
@@ -625,6 +674,7 @@ async def ai_orchestrate_detection(detection_id: int) -> dict:
                         "content": result_str,
                     })
                 else:
+                    # OpenAI + Ollama use same tool result format
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],

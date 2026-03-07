@@ -818,7 +818,7 @@ a{color:#e65c00!important;}
 </head>
 <body>
 <!-- ═══ LOGIN OVERLAY ═══ -->
-<div class="login-overlay" id="login-overlay">
+<div class="login-overlay hidden" id="login-overlay">
   <div class="login-box">
     <div style="font-size:32px;margin-bottom:8px;">🛡️</div>
     <h1>ArgusWatch AI-Agentic Threat Intelligence</h1>
@@ -882,6 +882,8 @@ a{color:#e65c00!important;}
     <div class="sb-item" onclick="go('threatgraph')"><span class="ico">🌐</span>Threat Universe</div>
     <div class="sb-item" onclick="go('customers')"><span class="ico">👥</span>Customers</div>
     <div class="sb-item" onclick="go('reports')"><span class="ico">📄</span>Reports</div>
+    <div class="sb-item" onclick="go('remediations')"><span class="ico">🔧</span>Remediations</div>
+    <div class="sb-item" onclick="go('fppatterns')"><span class="ico">🧠</span>FP Memory</div>
     <div class="sb-item" onclick="go('settings')"><span class="ico">⚙️</span>Settings</div>
   </div>
   <div class="sb-lbl" style="display:flex;align-items:center;gap:5px;">
@@ -1041,7 +1043,12 @@ a{color:#e65c00!important;}
     <button class="btn" onclick="loadCa()">↻</button>
   </div>
   <div id="ca-grid" class="grid-3"></div>
-  <div class="empty" id="ca-empty" style="display:none;">No active campaigns detected yet. Campaigns are auto-correlated when patterns emerge.</div>
+  <div class="empty" id="ca-empty" style="display:none;padding:40px;text-align:center;">
+    <div style="font-size:48px;margin-bottom:12px;">⚔️</div>
+    <div style="font-size:18px;font-weight:700;color:var(--text);margin-bottom:8px;">No campaigns detected yet</div>
+    <div style="font-size:14px;color:var(--text3);line-height:1.7;max-width:500px;margin:0 auto 20px;">Campaigns are created when the AI finds patterns across multiple findings for the same customer, like shared threat actors, similar IOC types, or coordinated attack timing. Make sure you have customers with findings first.</div>
+    <button class="btn pri" onclick="apiPost('/api/campaigns/detect').then(r=>{toast('Campaign detection running...');setTimeout(loadCa,3000)})">⚡ Run Campaign Detection</button>
+  </div>
 </div>
 
 <!-- ═══ DETECTIONS ═══ -->
@@ -1121,6 +1128,26 @@ a{color:#e65c00!important;}
     <div><div class="sec-title"><span class="ico">📄</span>Reports</div><div class="sec-sub">PDF threat intelligence reports per customer</div></div>
   </div>
   <div id="rep-list"></div>
+</div>
+
+<!-- ═══ REMEDIATIONS ═══ -->
+<div class="view" id="view-remediations">
+  <div class="sec-head">
+    <div><div class="sec-title"><span class="ico">🔧</span>Remediation Actions</div><div class="sec-sub">All active and completed remediation tasks across customers</div></div>
+    <div class="flex gap-8">
+      <button class="btn pri" onclick="createRemediationGlobal()">+ Create</button>
+      <button class="btn" onclick="loadRemPage()">↻</button>
+    </div>
+  </div>
+  <div id="rem-stats" class="stats mb-16"></div>
+  <div id="rem-filters" style="margin-bottom:12px;display:flex;gap:8px;flex-wrap:wrap;">
+    <button class="btn active" onclick="filterRem('all',this)">All</button>
+    <button class="btn" onclick="filterRem('pending',this)">⏳ Pending</button>
+    <button class="btn" onclick="filterRem('in_progress',this)">🔄 In Progress</button>
+    <button class="btn" onclick="filterRem('completed',this)">✅ Completed</button>
+    <button class="btn" onclick="filterRem('overdue',this)">🚨 Overdue</button>
+  </div>
+  <div id="rem-grid"></div>
 </div>
 
 <!-- ═══ SETTINGS ═══ -->
@@ -1273,16 +1300,54 @@ function showLegalIfNeeded(){
 
 <!-- ═══ ONBOARD MODAL ═══ -->
 <div class="modal-bg" id="m-onboard" onclick="if(event.target===this)closeM(this.id)">
-  <div class="modal" style="max-width:500px;">
-    <div class="modal-head"><h2>Onboard Customer</h2><button class="modal-close" onclick="closeM('m-onboard')">✕</button></div>
+  <div class="modal" style="max-width:560px;">
+    <div class="modal-head"><h2>➕ Onboard New Customer</h2><button class="modal-close" onclick="closeM('m-onboard')">✕</button></div>
     <div class="modal-body">
-      <div class="mb-12"><label class="text-sm text-muted">Company Name</label><input id="ob-name" class="btn w-full" placeholder="Acme Corp" style="text-align:left;"></div>
-      <div class="mb-12"><label class="text-sm text-muted">Primary Domain</label><input id="ob-domain" class="btn w-full" placeholder="acme.com" style="text-align:left;"></div>
-      <div class="mb-12"><label class="text-sm text-muted">Contact Email</label><input id="ob-email" class="btn w-full" placeholder="security@acme.com" style="text-align:left;"></div>
-      <div class="mb-16"><label class="text-sm text-muted">Industry</label>
-        <select id="ob-industry" class="btn w-full"><option value="technology">Technology</option><option value="financial">Financial Services</option><option value="healthcare">Healthcare</option><option value="manufacturing">Manufacturing</option><option value="retail">Retail</option><option value="energy">Energy</option><option value="government">Government</option><option value="education">Education</option><option value="defense">Defense</option><option value="legal">Legal</option><option value="insurance">Insurance</option><option value="telecommunications">Telecom</option><option value="transportation">Transportation</option><option value="hospitality">Hospitality</option><option value="cryptocurrency">Crypto</option><option value="aerospace">Aerospace</option><option value="pharmaceutical">Pharma</option><option value="other">Other</option></select>
+      <!-- Warning banner area -->
+      <div id="ob-warnings" style="display:none;margin-bottom:14px;padding:12px 14px;border-radius:10px;background:rgba(255,180,50,.12);border:1px solid rgba(255,180,50,.3);font-size:13px;line-height:1.5;color:#e8a020;"></div>
+      
+      <!-- Step 1: Form fields -->
+      <div id="ob-step1">
+        <div class="mb-12">
+          <label class="text-sm text-muted">Company Name <span style="color:var(--red);">*</span></label>
+          <input id="ob-name" class="btn w-full" placeholder="Acme Corp" style="text-align:left;" oninput="obValidateLive()">
+        </div>
+        <div class="mb-12">
+          <label class="text-sm text-muted">Primary Domain <span style="color:var(--red);">*</span></label>
+          <input id="ob-domain" class="btn w-full" placeholder="acme.com" style="text-align:left;" oninput="obValidateLive()">
+          <div id="ob-domain-hint" style="font-size:11px;margin-top:4px;color:var(--text3);"></div>
+        </div>
+        <div class="mb-12">
+          <label class="text-sm text-muted">Contact Email</label>
+          <input id="ob-email" class="btn w-full" placeholder="security@acme.com" style="text-align:left;">
+        </div>
+        <div class="mb-16">
+          <label class="text-sm text-muted">Industry <span style="color:var(--red);">*</span></label>
+          <select id="ob-industry" class="btn w-full"><option value="technology">Technology</option><option value="financial">Financial Services</option><option value="healthcare">Healthcare</option><option value="manufacturing">Manufacturing</option><option value="retail">Retail</option><option value="energy">Energy</option><option value="government">Government</option><option value="education">Education</option><option value="defense">Defense</option><option value="legal">Legal</option><option value="insurance">Insurance</option><option value="telecommunications">Telecom</option><option value="transportation">Transportation</option><option value="hospitality">Hospitality</option><option value="cryptocurrency">Crypto</option><option value="aerospace">Aerospace</option><option value="pharmaceutical">Pharma</option><option value="other">Other</option></select>
+        </div>
+        
+        <!-- What happens next -->
+        <div style="padding:10px 14px;border-radius:8px;background:rgba(100,160,255,.08);border:1px solid rgba(100,160,255,.15);font-size:12px;line-height:1.6;margin-bottom:14px;color:var(--text2);">
+          <b>What happens after onboarding:</b><br>
+          1. Domain, brand, keyword assets auto-registered<br>
+          2. Industry tech stack added as <i>unconfirmed</i> (won't generate findings until you verify)<br>
+          3. Recon engine discovers subdomains, IPs, certificates<br>
+          4. Correlation engine matches existing threat intel → instant findings<br>
+          5. Collectors start monitoring for this customer's domain
+        </div>
+
+        <button id="ob-submit-btn" class="btn pri w-full" onclick="doOnboard()" disabled style="opacity:.5;">🚀 Onboard & Start Monitoring</button>
+        <div id="ob-status" style="text-align:center;font-size:12px;margin-top:8px;color:var(--text3);"></div>
       </div>
-      <button class="btn pri w-full" onclick="doOnboard()">🚀 Onboard & Start Monitoring</button>
+      
+      <!-- Step 2: Confirmation (shown when backend returns warning) -->
+      <div id="ob-step2" style="display:none;">
+        <div id="ob-confirm-msg" style="padding:14px;border-radius:10px;background:rgba(255,80,80,.1);border:1px solid rgba(255,80,80,.25);font-size:13px;line-height:1.6;margin-bottom:14px;"></div>
+        <div style="display:flex;gap:10px;">
+          <button class="btn w-full" onclick="obBackToStep1()" style="flex:1;">← Go Back & Fix</button>
+          <button class="btn w-full" onclick="doOnboard(true)" style="flex:1;background:rgba(255,80,80,.15);border-color:rgba(255,80,80,.3);color:#ff6060;">⚠️ Proceed Anyway</button>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1327,18 +1392,21 @@ let _authRole=sessionStorage.getItem('aw_role')||'';
 
 // ═══ AUTH - Login / Logout / Token ═══
 async function checkAuth(){
-  // Try /api/auth/me to see if auth is disabled or we have a valid token
+  // AUTH_DISABLED=true (default) → skip login, let normal init continue
   try{
     const h={};if(_authToken)h['Authorization']='Bearer '+_authToken;
-    const r=await fetch('/api/auth/me',{headers:h});
+    const ctrl=new AbortController();setTimeout(()=>ctrl.abort(),3000);
+    const r=await fetch('/api/auth/me',{headers:h,signal:ctrl.signal});
     if(r.ok){const d=await r.json();
       if(d.auth_disabled){document.getElementById('login-overlay')?.classList.add('hidden');return;}
       _authUser=d.username;_authRole=d.role;
       document.getElementById('login-overlay')?.classList.add('hidden');updateUserBadge();return;}
+    if(r.status===401){
+      document.getElementById('login-overlay')?.classList.remove('hidden');
+      document.getElementById('login-skip').style.display='block';return;}
   }catch(e){}
-  // Show skip button if auth might be disabled
-  try{const r=await fetch('/health');if(r.ok)document.getElementById('login-skip').style.display='block';}catch(e){}
-  document.getElementById('login-overlay')?.classList.remove('hidden');
+  // Backend not ready — skip login (AUTH_DISABLED is default)
+  document.getElementById('login-overlay')?.classList.add('hidden');
 }
 async function doLogin(){
   const u=document.getElementById('login-user')?.value;const p=document.getElementById('login-pass')?.value;
@@ -1361,7 +1429,7 @@ async function api(path,opts={}){
     if(_authToken)headers['Authorization']='Bearer '+_authToken;
     const r=await fetch(path,{...opts,headers});
     if(r.status===401){document.getElementById('login-overlay')?.classList.remove('hidden');return null;}
-    if(!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+    if(!r.ok){try{return await r.json();}catch(e2){return null;}}
     return await r.json();
   }catch(e){console.warn('API:',path,e.message);return null;}
 }
@@ -1383,12 +1451,13 @@ function go(view){
     const match={'overview':'overview','findings':'findings','campaigns':'campaigns','detections':'detections',
       'actors':'actors','dark web':'darkweb','exposure':'exposure','threat universe':'threatgraph',
       'customers':'customers','reports':'reports','settings':'settings','sla':'sla',
-      'fp memory':'fppatterns','advisories':'advisories','unattributed':'unattributed'}; 
+      'fp memory':'fppatterns','advisories':'advisories','unattributed':'unattributed',
+      'remediation':'remediations'}; 
     if(Object.entries(match).find(([k,v])=>v===view&&txt.includes(k.substring(0,4))))s.classList.add('active');
   });
   const loaders={overview:loadOv,findings:loadF,campaigns:loadCa,detections:loadD,actors:loadAct,
     darkweb:()=>loadDW(''),exposure:loadExp,threatgraph:()=>{const f=document.getElementById('tg-iframe');f.src='about:blank';setTimeout(()=>{f.src='/threat-universe';},100);},customers:loadCust,reports:loadRep,
-    settings:loadSet,sla:loadSLA,fppatterns:loadFP,advisories:loadAdvisories,unattributed:loadUnattr};
+    settings:loadSet,sla:loadSLA,fppatterns:loadFP,advisories:loadAdvisories,unattributed:loadUnattr,remediations:loadRemPage};
   if(loaders[view])loaders[view]();
 }
 
@@ -1587,7 +1656,7 @@ async function loadF(){
 
 // ═══ FINDING DETAIL - /api/findings/{id}, /api/playbooks/{ioc_type}, /api/enrich/{detection_id}, PATCH status ═══
 async function openFi(id){
-  const [f,remStats]=await Promise.all([api('/api/findings/'+id),api('/api/remediations/stats')]);
+  const [f,remStats]=await Promise.all([api('/api/findings/'+id),api('/api/finding-remediations/stats')]);
   if(!f)return;
   const pb=f.ioc_type?await api('/api/playbooks/'+encodeURIComponent(f.ioc_type)):null;
   document.getElementById('mf-title').innerHTML=`Finding #${f.id} <span class="text-muted text-sm">· ${f.ioc_type||''}</span>`;
@@ -1709,6 +1778,9 @@ async function openFi(id){
           </div>`:''}
           <div style="margin-top:8px;padding:8px 12px;border-radius:8px;background:rgba(0,137,123,.04);border-left:3px solid var(--cyan);font-size:12px;color:var(--text2);line-height:1.5;">
             <b>How was this matched?</b> ${corrExplain[corrType]||corrExplain['pattern_match']}. The IOC <code style="font-size:11px;background:var(--surface);padding:1px 6px;border-radius:4px;">${iocVal.substring(0,50)}${iocVal.length>50?'...':''}</code> was found in ${f.source_count||1} threat intelligence source${(f.source_count||1)>1?'s':''} and correlated to ${f.customer_name}'s registered assets.
+            <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+              ${(f.sources||f.sources_detail||[]).filter(s=>s.detection_id).slice(0,5).map(s=>`<button class="btn" style="font-size:11px;padding:4px 12px;" onclick="closeM('m-finding');openDetDetail(${s.detection_id})">📡 ${s.source||'source'} #${s.detection_id} →</button>`).join('')||`<span style="font-size:11px;color:var(--text4);">Source detection linked at correlation</span>`}
+            </div>
           </div>
         </div>`;
       // ═══ PROOF CHAIN  -  Evidence Trail ═══
@@ -1882,7 +1954,7 @@ async function exportSTIX(detId){const r=await apiPost('/api/stix/export/'+detId
 
 // ═══ CAMPAIGNS - /api/campaigns ═══
 async function loadCa(){
-  const data=await api('/api/campaigns?status=active');
+  const data=await api('/api/campaigns?status=');
   const items=Array.isArray(data)?data:(data?.campaigns||[]);
   // Sort: CRITICAL → HIGH → MEDIUM → LOW (backup client-side sort)
   const sevOrd={CRITICAL:0,HIGH:1,MEDIUM:2,LOW:3};
@@ -2198,7 +2270,7 @@ async function loadD(){
   document.getElementById('det-grid').innerHTML=items.map(d=>{
     const conf=d.confidence?d.confidence.toFixed(2):'?';
     const confColor=conf>=0.8?'var(--green)':conf>=0.5?'var(--amber)':'var(--text4)';
-    return`<div class="det-card" onclick="enrichIOC('${(d.ioc_value||'').replace(/'/g,"\\'")}','${d.ioc_type||''}')">
+    return`<div class="det-card" onclick="openDetDetail(${d.id})">
       <div class="det-top"><span class="tag info">${d.ioc_type||'-'}</span><span class="text-xs text-muted">${ago(d.collected_at||d.created_at)}</span></div>
       <div class="mono text-sm font-bold" style="word-break:break-all;margin:6px 0;">${d.ioc_value||'-'}</div>
       <div class="det-meta"><span>📡 ${d.source||'-'}</span><span class="mono" style="color:${confColor};">📊 ${conf}</span>
@@ -2357,10 +2429,10 @@ async function loadDW(filter){
   const [items,stats,triageStats]=await Promise.all([
     api('/api/darkweb?limit=60'+(filter?'&source='+filter:'')),api('/api/darkweb/stats'),api('/api/darkweb/triage-stats')]);
   if(stats){document.getElementById('dw-stats').innerHTML=
-    `<div class="stat red" style="border-radius:14px;border:1.5px solid rgba(220,38,38,.15);background:linear-gradient(135deg,rgba(220,38,38,.06),rgba(220,38,38,.02));cursor:pointer;transition:all .3s;" onclick="loadDW('ransomwatch');document.getElementById('dw-list').scrollIntoView({behavior:'smooth'});this.style.boxShadow='0 0 30px rgba(220,38,38,.3)';setTimeout(()=>this.style.boxShadow='',1000)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(220,38,38,.12)';this.style.borderColor='rgba(220,38,38,.4)'" onmouseout="this.style.transform='';this.style.boxShadow='';this.style.borderColor='rgba(220,38,38,.15)'"><div class="stat-num red" style="font-size:32px;">${stats.ransomware_claims||0}</div><div class="stat-lbl">Ransomware Claims</div><div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:4px;">click to filter ↓</div></div>
-    <div class="stat orange" style="border-radius:14px;border:1.5px solid rgba(234,88,12,.15);background:linear-gradient(135deg,rgba(234,88,12,.06),rgba(234,88,12,.02));cursor:pointer;transition:all .3s;" onclick="loadDW('paste');document.getElementById('dw-list').scrollIntoView({behavior:'smooth'});this.style.boxShadow='0 0 30px rgba(234,88,12,.3)';setTimeout(()=>this.style.boxShadow='',1000)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(234,88,12,.12)';this.style.borderColor='rgba(234,88,12,.4)'" onmouseout="this.style.transform='';this.style.boxShadow='';this.style.borderColor='rgba(234,88,12,.15)'"><div class="stat-num orange" style="font-size:32px;">${stats.paste_dumps||stats.total_mentions||0}</div><div class="stat-lbl">Paste Dumps</div><div style="font-size:10px;color:#ea580c;font-weight:600;margin-top:4px;">click to filter ↓</div></div>
-    <div class="stat purple" style="border-radius:14px;border:1.5px solid rgba(124,58,237,.15);background:linear-gradient(135deg,rgba(124,58,237,.06),rgba(124,58,237,.02));cursor:pointer;transition:all .3s;" onclick="loadDW('');document.getElementById('dw-list').scrollIntoView({behavior:'smooth'});this.style.boxShadow='0 0 30px rgba(124,58,237,.3)';setTimeout(()=>this.style.boxShadow='',1000)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(124,58,237,.12)';this.style.borderColor='rgba(124,58,237,.4)'" onmouseout="this.style.transform='';this.style.boxShadow='';this.style.borderColor='rgba(124,58,237,.15)'"><div class="stat-num purple" style="font-size:32px;">${stats.dark_web_mentions||0}</div><div class="stat-lbl">All DW Mentions</div><div style="font-size:10px;color:#7c3aed;font-weight:600;margin-top:4px;">click to show all ↓</div></div>
-    <div class="stat amber" style="border-radius:14px;border:1.5px solid rgba(230,92,0,.15);background:linear-gradient(135deg,rgba(230,92,0,.06),rgba(230,92,0,.02));cursor:pointer;transition:all .3s;" onclick="triggerDWTriage();this.style.boxShadow='0 0 30px rgba(230,92,0,.3)';setTimeout(()=>this.style.boxShadow='',1000)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(230,92,0,.12)';this.style.borderColor='rgba(230,92,0,.4)'" onmouseout="this.style.transform='';this.style.boxShadow='';this.style.borderColor='rgba(230,92,0,.15)'"><div class="stat-num amber" style="font-size:32px;">${triageStats?.triaged||stats.customer_attributed||0}</div><div class="stat-lbl">AI Triaged</div><div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:4px;">click to run triage ⚡</div></div>`;}
+    `<div class="stat red" style="border-radius:14px;border:1.5px solid rgba(220,38,38,.15);background:linear-gradient(135deg,rgba(220,38,38,.06),rgba(220,38,38,.02));cursor:pointer;transition:all .3s;" onclick="loadDW('ransomwatch');toast('Filtering ransomware claims...','info');setTimeout(()=>document.getElementById('dw-list')?.scrollIntoView({behavior:'smooth',block:'start'}),300)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(220,38,38,.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''"><div class="stat-num red" style="font-size:32px;">${stats.ransomware_claims||0}</div><div class="stat-lbl">Ransomware Claims</div><div style="font-size:10px;color:#dc2626;font-weight:600;margin-top:4px;">click to filter ↓</div></div>
+    <div class="stat orange" style="border-radius:14px;border:1.5px solid rgba(234,88,12,.15);background:linear-gradient(135deg,rgba(234,88,12,.06),rgba(234,88,12,.02));cursor:pointer;transition:all .3s;" onclick="loadDW('paste');toast('Filtering paste dumps...','info');setTimeout(()=>document.getElementById('dw-list')?.scrollIntoView({behavior:'smooth',block:'start'}),300)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(234,88,12,.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''"><div class="stat-num orange" style="font-size:32px;">${stats.paste_dumps||stats.total_mentions||0}</div><div class="stat-lbl">Paste Dumps</div><div style="font-size:10px;color:#ea580c;font-weight:600;margin-top:4px;">click to filter ↓</div></div>
+    <div class="stat purple" style="border-radius:14px;border:1.5px solid rgba(124,58,237,.15);background:linear-gradient(135deg,rgba(124,58,237,.06),rgba(124,58,237,.02));cursor:pointer;transition:all .3s;" onclick="loadDW('');toast('Loading all mentions...','info');setTimeout(()=>document.getElementById('dw-list')?.scrollIntoView({behavior:'smooth',block:'start'}),300)" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(124,58,237,.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''"><div class="stat-num purple" style="font-size:32px;">${stats.dark_web_mentions||0}</div><div class="stat-lbl">All DW Mentions</div><div style="font-size:10px;color:#7c3aed;font-weight:600;margin-top:4px;">click to show all ↓</div></div>
+    <div class="stat amber" style="border-radius:14px;border:1.5px solid rgba(230,92,0,.15);background:linear-gradient(135deg,rgba(230,92,0,.06),rgba(230,92,0,.02));cursor:pointer;transition:all .3s;" onclick="triggerDWTriage();toast('🤖 Running AI triage on dark web mentions...','info')" onmouseover="this.style.transform='translateY(-3px)';this.style.boxShadow='0 6px 20px rgba(230,92,0,.15)'" onmouseout="this.style.transform='';this.style.boxShadow=''"><div class="stat-num amber" style="font-size:32px;">${triageStats?.triaged||stats.customer_attributed||0}</div><div class="stat-lbl">AI Triaged</div><div style="font-size:10px;color:var(--orange);font-weight:600;margin-top:4px;">click to run triage ⚡</div></div>`;}
   const list=items?.mentions||items||[];
   _dwItems=list;
   document.getElementById('dw-list').innerHTML=list.map(d=>{
@@ -3109,14 +3181,139 @@ async function executeDeleteCustomer(cid,name){
   }
 }
 
-// ═══ ONBOARD - POST /api/customers/onboard ═══
-async function doOnboard(){
-  const name=document.getElementById('ob-name').value,domain=document.getElementById('ob-domain').value,
-    email=document.getElementById('ob-email').value,industry=document.getElementById('ob-industry').value;
+// ═══ ONBOARD - POST /api/customers/onboard (V16.4.6: validated) ═══
+function obValidateLive(){
+  const name=(document.getElementById('ob-name').value||'').trim();
+  const domain=(document.getElementById('ob-domain').value||'').trim().toLowerCase();
+  const btn=document.getElementById('ob-submit-btn');
+  const hint=document.getElementById('ob-domain-hint');
+  const warn=document.getElementById('ob-warnings');
+  let warnings=[];
+  
+  // Basic checks
+  const ok=name.length>=2 && domain.length>=4 && domain.includes('.');
+  btn.disabled=!ok; btn.style.opacity=ok?'1':'.5';
+  
+  if(!domain){hint.innerHTML='';warn.style.display='none';return;}
+  
+  // Format check
+  if(domain.includes(' ')){hint.innerHTML='<span style="color:var(--red);">⚠ Domain cannot contain spaces</span>';btn.disabled=true;btn.style.opacity='.5';return;}
+  if(!domain.match(/^[a-z0-9][a-z0-9\-\.]+\.[a-z]{2,}$/)){hint.innerHTML='<span style="color:var(--orange);">⚠ Check format — expected: company.com</span>';
+  }else{hint.innerHTML='<span style="color:var(--green);">✓ Valid format</span>';}
+  
+  // Name-domain mismatch check (mirrors backend)
+  if(name.length>=3 && domain.length>=4){
+    const dRoot=domain.replace('www.','').split('.')[0];
+    const nameWords=name.toLowerCase().match(/[a-z0-9]{3,}/g)||[];
+    const nameConcat=nameWords.join('');
+    const acronym=nameWords.length>=2?nameWords.map(w=>w[0]).join(''):'';
+    const match=nameWords.some(w=>dRoot.includes(w)||w.includes(dRoot))
+      ||dRoot.includes(nameConcat)||nameConcat.includes(dRoot)
+      ||(acronym&&(acronym===dRoot||dRoot.startsWith(acronym)));
+    if(!match){
+      warnings.push('⚠️ <b>Domain mismatch:</b> "'+name+'" and "'+domain+'" don\'t appear related. Double-check the domain is correct.');
+    }
+  }
+  
+  if(warnings.length){warn.innerHTML=warnings.join('<br>');warn.style.display='block';}
+  else{warn.style.display='none';}
+}
+function obBackToStep1(){
+  document.getElementById('ob-step1').style.display='block';
+  document.getElementById('ob-step2').style.display='none';
+}
+async function doOnboard(confirm=false){
+  const name=document.getElementById('ob-name').value.trim();
+  const domain=document.getElementById('ob-domain').value.trim().toLowerCase();
+  const email=document.getElementById('ob-email').value.trim();
+  const industry=document.getElementById('ob-industry').value;
   if(!name||!domain){toast('Name and domain required','error');return;}
-  toast('Onboarding '+name+'...');
-  const r=await apiPost('/api/customers/onboard',{name,domain,email,industry});
-  if(r&&!r.error){toast(name+' onboarded! '+((r.intel_match?.total_matches||r.finding_count||0)+' findings'));closeM('m-onboard');go('customers');}else if(r&&r.error){toast(r.error+': '+(r.details||[]).join(', '),'error');}else{toast('Onboard failed','error');}
+  
+  const status=document.getElementById('ob-status');
+  status.innerHTML='<span style="color:var(--blue);">⏳ Onboarding... recon + correlation may take 30-90s for large domains</span>';
+  document.getElementById('ob-submit-btn').disabled=true;
+  
+  const body={name,domain,email,industry};
+  if(confirm)body.confirm=true;
+  
+  // Use longer timeout for onboard (recon can be slow for large domains)
+  let r;
+  try{
+    const ctrl=new AbortController();const tid=setTimeout(()=>ctrl.abort(),120000); // 2 min timeout
+    const resp=await fetch('/api/customers/onboard',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body),signal:ctrl.signal});
+    clearTimeout(tid);
+    r=await resp.json();
+  }catch(e){
+    if(e.name==='AbortError'){
+      status.innerHTML='<span style="color:var(--amber);">⏱️ Onboard is running in background (large domain). Check Customers page in 1-2 minutes.</span>';
+      document.getElementById('ob-submit-btn').disabled=false;
+      return;
+    }
+    r={error:'Connection failed',detail:e.message};
+  }
+  
+  if(r&&r.error==='Domain mismatch'){
+    // Show confirmation step
+    document.getElementById('ob-step1').style.display='none';
+    document.getElementById('ob-step2').style.display='block';
+    document.getElementById('ob-confirm-msg').innerHTML=
+      '<b>⚠️ Domain Mismatch Detected</b><br><br>'+
+      (r.detail||'Company name and domain don\'t match.')+'<br><br>'+
+      '<b>Common causes:</b> typo in domain, subsidiary with different name, acquired company.<br>'+
+      'If this is correct, click "Proceed Anyway" to continue.';
+    status.innerHTML='';
+    document.getElementById('ob-submit-btn').disabled=false;
+    return;
+  }
+  if(r&&r.error==='Domain does not resolve'){
+    document.getElementById('ob-step1').style.display='none';
+    document.getElementById('ob-step2').style.display='block';
+    document.getElementById('ob-confirm-msg').innerHTML=
+      '<b>⚠️ Domain Not Found</b><br><br>'+
+      (r.detail||'This domain has no DNS records.')+'<br><br>'+
+      '<b>Common causes:</b> typo, internal-only domain, domain expired.<br>'+
+      'If this is an internal domain, click "Proceed Anyway."';
+    status.innerHTML='';
+    document.getElementById('ob-submit-btn').disabled=false;
+    return;
+  }
+  if(r&&r.customer_id&&!r.error){
+    const findings=r.intel_match?.total_matches||r.findings_promoted||r.finding_count||0;
+    const assets=r.assets_auto_registered?.length||0;
+    const tech=r.tech_stack_defaults?.length||0;
+    const recon=r.recon?.assets_discovered||0;
+    // Show success state in modal before closing
+    status.innerHTML=`<div style="padding:16px;border-radius:12px;background:rgba(40,167,69,.08);border:2px solid rgba(40,167,69,.3);text-align:center;margin-top:12px;">
+      <div style="font-size:32px;margin-bottom:8px;">✅</div>
+      <div style="font-size:16px;font-weight:800;color:#28a745;margin-bottom:6px;">${name} Onboarded Successfully!</div>
+      <div style="display:flex;gap:16px;justify-content:center;margin-top:10px;">
+        <div style="text-align:center;"><div style="font-size:20px;font-weight:800;color:var(--text);">${findings}</div><div style="font-size:10px;color:var(--text3);">Findings</div></div>
+        <div style="text-align:center;"><div style="font-size:20px;font-weight:800;color:var(--text);">${assets+recon}</div><div style="font-size:10px;color:var(--text3);">Assets</div></div>
+        <div style="text-align:center;"><div style="font-size:20px;font-weight:800;color:var(--text);">${tech}</div><div style="font-size:10px;color:var(--text3);">Tech Stack</div></div>
+      </div>
+      <div style="font-size:11px;color:var(--text3);margin-top:8px;">Redirecting to customer page...</div>
+    </div>`;
+    document.getElementById('ob-submit-btn').style.display='none';
+    toast(name+' onboarded! '+findings+' findings, '+(assets+recon)+' assets','success');
+    // Auto-close after 2.5s and navigate
+    setTimeout(()=>{
+      closeM('m-onboard');
+      document.getElementById('ob-name').value='';document.getElementById('ob-domain').value='';
+      document.getElementById('ob-email').value='';document.getElementById('ob-warnings').style.display='none';
+      document.getElementById('ob-domain-hint').innerHTML='';document.getElementById('ob-submit-btn').style.display='';
+      document.getElementById('ob-submit-btn').disabled=false;obBackToStep1();
+      go('customers');
+    },2500);
+  }else if(r&&r.error){
+    toast(r.error+': '+(r.detail||(r.details||[]).join(', ')),'error');
+    status.innerHTML='<span style="color:var(--red);">'+r.error+'</span>';
+    document.getElementById('ob-submit-btn').disabled=false;
+  }else{
+    const msg=r?.detail||r?.error||r?.message||'Unknown error — check browser console (F12)';
+    toast('Onboard failed: '+msg,'error');
+    status.innerHTML='<span style="color:var(--red);">'+msg+'</span>';
+    document.getElementById('ob-submit-btn').disabled=false;
+  }
 }
 
 // ═══ CUSTOMER ACTIONS  -  wiring unwired endpoints ═══
@@ -3174,6 +3371,87 @@ async function patchDetStatus(detId,newStatus){
   const r=await fetch('/api/detections/'+detId+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})}).then(r=>r.json()).catch(()=>null);
   if(r&&!r.error){toast('Detection → '+newStatus,'success');loadD();}else{toast('Update failed','error');}
 }
+
+// ═══ DETECTION DETAIL MODAL (V16.4.6) ═══
+async function openDetDetail(detId){
+  const d=await api('/api/detections/'+detId);
+  if(!d||d.error){toast('Detection not found','error');return;}
+  const sev=d.severity||'MEDIUM';
+  const sevC={'CRITICAL':'#c62828','HIGH':'#e65100','MEDIUM':'#f9a825','LOW':'#2e7d32','INFO':'#9e9e9e'}[sev]||'#e65100';
+  const meta=d.metadata||{};
+  const extLinks=[];
+  if(d.ioc_type==='cve_id'){
+    extLinks.push({icon:'🏛️',label:'NVD',url:'https://nvd.nist.gov/vuln/detail/'+d.ioc_value});
+    extLinks.push({icon:'🔴',label:'CISA KEV',url:'https://www.cisa.gov/known-exploited-vulnerabilities-catalog'});
+  }
+  if(d.ioc_type==='domain'||d.ioc_type==='url'){
+    extLinks.push({icon:'🔍',label:'VirusTotal',url:'https://www.virustotal.com/gui/domain/'+encodeURIComponent((d.ioc_value||'').replace(/https?:\/\//,'').split('/')[0])});
+    extLinks.push({icon:'🌐',label:'URLScan',url:'https://urlscan.io/search/#'+encodeURIComponent(d.ioc_value)});
+  }
+  if(d.ioc_type==='ipv4'){
+    extLinks.push({icon:'🔍',label:'VirusTotal',url:'https://www.virustotal.com/gui/ip-address/'+d.ioc_value});
+    extLinks.push({icon:'🛡️',label:'AbuseIPDB',url:'https://www.abuseipdb.com/check/'+d.ioc_value});
+    extLinks.push({icon:'📡',label:'Shodan',url:'https://internetdb.shodan.io/'+d.ioc_value});
+  }
+  if(d.ioc_type==='hash_sha256'){
+    extLinks.push({icon:'🔍',label:'VirusTotal',url:'https://www.virustotal.com/gui/file/'+d.ioc_value});
+    extLinks.push({icon:'🦠',label:'MalwareBazaar',url:'https://bazaar.abuse.ch/sample/'+d.ioc_value});
+  }
+  if(d.source==='grep_app') extLinks.push({icon:'🔎',label:'grep.app',url:'https://grep.app/search?q='+encodeURIComponent((d.ioc_value||'').substring(0,50))});
+  if(d.source==='github_gist') extLinks.push({icon:'🐙',label:'GitHub Gists',url:'https://gist.github.com/search?q='+encodeURIComponent((d.ioc_value||'').substring(0,30))});
+  if(d.source==='crtsh'){const dom=(d.ioc_value||'').split('.').slice(-2).join('.');extLinks.push({icon:'📜',label:'crt.sh',url:'https://crt.sh/?q=%25.'+dom});}
+  if(d.source==='openphish') extLinks.push({icon:'🎣',label:'OpenPhish',url:'https://openphish.com/'});
+  if(d.source==='urlhaus') extLinks.push({icon:'🔗',label:'URLhaus',url:'https://urlhaus.abuse.ch/browse.php?search='+encodeURIComponent(d.ioc_value)});
+  if(d.source==='abuse_ch'||d.source==='feodo') extLinks.push({icon:'🛡️',label:'Abuse.ch',url:'https://feodotracker.abuse.ch/browse/host/'+d.ioc_value+'/'});
+  if(d.source==='ransomwatch') extLinks.push({icon:'🔴',label:'Ransomwatch',url:'https://ransomwatch.telemetry.lt/'});
+  if(!extLinks.find(l=>l.label==='VirusTotal')&&d.ioc_value) extLinks.push({icon:'🔍',label:'VirusTotal',url:'https://www.virustotal.com/gui/search/'+encodeURIComponent(d.ioc_value)});
+
+  let h=`<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+    <div style="padding:6px 14px;border-radius:10px;font-size:13px;font-weight:800;background:${sevC}15;color:${sevC};border:1px solid ${sevC}30;">${sev}</div>
+    <div style="flex:1;">
+      <div style="font-size:11px;color:var(--text4);text-transform:uppercase;font-weight:700;">Detection #${d.id} · ${d.ioc_type}</div>
+      <div style="font-size:16px;font-weight:800;font-family:'JetBrains Mono';color:var(--text);word-break:break-all;">${escHtml(d.ioc_value||'-')}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+    <div style="padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;">📡 <b>${d.source||'-'}</b></div>
+    <div style="padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;">📊 Conf: <b>${d.confidence?.toFixed(2)||'?'}</b></div>
+    <div style="padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;">⏱️ SLA: <b>${d.sla_hours||'-'}h</b></div>
+    ${d.customer_id?`<div style="padding:6px 12px;border-radius:8px;background:rgba(0,137,123,.06);border:1px solid rgba(0,137,123,.15);font-size:12px;color:var(--cyan);cursor:pointer;" onclick="closeM('m-drilldown');openCu(${d.customer_id})">🏢 Customer →</div>`:''}
+    ${d.finding_id?`<div style="padding:6px 12px;border-radius:8px;background:rgba(230,92,0,.06);border:1px solid rgba(230,92,0,.15);font-size:12px;color:var(--orange);cursor:pointer;" onclick="closeM('m-drilldown');openFi(${d.finding_id})">🎯 Finding #${d.finding_id} →</div>`:''}
+  </div>`;
+  h+=`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--orange);margin-bottom:6px;letter-spacing:1px;">📋 Raw Intelligence (Source Evidence)</div>
+    <div style="padding:14px;border-radius:10px;background:#1a1a2e;color:#e0e0e0;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:250px;overflow-y:auto;border:1px solid #333;">${escHtml(d.raw_text||'No raw text available')}</div></div>`;
+  if(d.matched_asset||d.correlation_type){
+    h+=`<div style="padding:12px;border-radius:10px;background:rgba(0,137,123,.04);border:1px solid rgba(0,137,123,.12);margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--cyan);margin-bottom:6px;">🔗 Correlation</div>
+      <div style="font-size:13px;color:var(--text);">Matched via <b>${(d.correlation_type||'').replace(/_/g,' ')}</b> against <code style="background:var(--surface);padding:2px 6px;border-radius:4px;">${escHtml(d.matched_asset||'-')}</code></div>
+      ${d.source_count>1?`<div style="margin-top:4px;font-size:12px;color:var(--green);font-weight:700;">✓ ${d.source_count} independent sources</div>`:''}
+    </div>`;
+  }
+  if(meta&&Object.keys(meta).length){
+    h+=`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--text3);margin-bottom:6px;">📦 Metadata</div>
+      <div style="padding:10px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-family:'JetBrains Mono';font-size:11px;max-height:120px;overflow-y:auto;white-space:pre-wrap;">${escHtml(JSON.stringify(meta,null,2))}</div></div>`;
+  }
+  if(extLinks.length){
+    h+=`<div style="margin-bottom:14px;"><div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--orange);margin-bottom:8px;letter-spacing:1px;">🔗 Verify Externally</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        ${extLinks.map(l=>`<a href="${l.url}" target="_blank" rel="noopener" style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:10px;background:var(--surface);border:1px solid var(--border);text-decoration:none;color:var(--text);font-size:12px;font-weight:600;transition:all .2s;" onmouseover="this.style.borderColor='var(--cyan)'" onmouseout="this.style.borderColor='var(--border)'">${l.icon} ${l.label} ↗</a>`).join('')}
+      </div></div>`;
+  }
+  h+=`<div style="display:flex;gap:8px;font-size:11px;color:var(--text4);border-top:1px solid var(--border);padding-top:10px;">
+    <span>Created: ${d.created_at?new Date(d.created_at).toLocaleString():'-'}</span>
+    ${d.first_seen?'<span>First: '+new Date(d.first_seen).toLocaleString()+'</span>':''}
+    ${d.last_seen?'<span>Last: '+new Date(d.last_seen).toLocaleString()+'</span>':''}
+  </div>
+  <div style="display:flex;gap:8px;margin-top:14px;padding-top:14px;border-top:1px solid var(--border);">
+    <button class="btn pri" style="font-size:12px;" onclick="enrichDetection(${d.id})">🔬 Enrich</button>
+    <button class="btn" style="font-size:12px;" onclick="patchDetStatus(${d.id},'resolved');closeM('m-drilldown')">✓ Resolve</button>
+    <button class="btn" style="font-size:12px;" onclick="apiPost('/api/export/cef/${d.id}').then(r=>toast(r?'CEF sent':'Failed',r?'success':'error'))">📋 CEF</button>
+    <button class="btn" style="font-size:12px;" onclick="cuExportSTIXDet(${d.id})">📦 STIX</button>
+  </div>`;
+  showDrilldown('📡 Detection #'+d.id+' · '+d.ioc_type,h);
+}
 async function batchEnrich(){
   toast('🔬 Running batch enrichment...');
   const r=await apiPost('/api/enrich/batch');
@@ -3197,30 +3475,20 @@ async function createRemed(findingId){
   const f=await api('/api/findings/'+findingId);
   if(!f||!f.detection_id){toast('No detection linked to this finding','error');return;}
   toast('Creating remediation...');
-  const r=await apiPost('/api/remediations/',{detection_id:f.detection_id,action_type:'manual',description:title});
+  const r=await apiPost('/api/finding-remediations/create',{finding_id:findingId,action_type:'manual',title:title});
   if(r&&!r.error){toast('Remediation created','success');openFi(findingId);}
   else{toast('Failed: '+(r?.detail||r?.error||'unknown'),'error');}
 }
 async function patchRemedStatus(remId,status,findingId){
-  // Try finding-based first, then detection-based
   if(findingId){
     const r=await apiPatch('/api/findings/'+findingId+'/remediations/'+remId+'?status='+status);
     if(r){toast('Remediation → '+status,'success');return;}
   }
-  const r2=await apiPatch('/api/remediations/'+remId+'/status',{status:status});
-  if(r2){toast('Remediation → '+status,'success');}
-  else{toast('Update failed','error');}
+  toast('Update failed — no finding linked','error');
 }
 async function patchRemed(remId,findingId){
-  const notes=prompt('Update notes:');
-  if(notes===null)return;
-  const r=await apiPatch('/api/remediations/'+remId,{notes:notes});
-  if(r){toast('Remediation updated','success');if(findingId)openFi(findingId);}
-  else{toast('Update failed','error');}
-}
-async function loadRemediations(){
-  const r=await api('/api/remediations/');
-  return r;
+  if(findingId) openRemDetail(remId);
+  else toast('No finding linked','error');
 }
 
 
@@ -3405,47 +3673,176 @@ async function exportSTIXCust(cid,name){
 }
 
 // ═══ SETTINGS - /api/settings/ai, /api/settings/ai-keys, /api/settings/active-provider, /api/collectors/status, /api/enterprise/status, /api/fp-patterns/stats ═══
-// ═══ REMEDIATIONS VIEW ═══
-async function loadRemediations(){
-  const r=await api('/api/remediations/');
-  const items=r?.items||r||[];
-  let h='<div class="sec-header"><div class="sec-title"><span class="ico">🔧</span>Remediations</div><button class="btn pri" style="font-size:12px;" onclick="createRemediation()">+ Create</button></div>';
-  if(!items.length){h+='<div class="empty">No remediation actions yet</div>';}
-  else{h+='<div class="grid-2">'+items.map(r=>{
+// ═══ OLD REMEDIATIONS - redirected to finding-remediations ═══
+async function loadRemediations(){loadRemPage();}
+async function createRemediation(){createRemediationGlobal();}
+async function toggleRemStatus(id,newStatus){
+  // Find the finding_id from _remData
+  const rem=_remData.find(r=>r.id===id);
+  if(rem)toggleFindingRemStatus(rem.finding_id,id,newStatus);
+  else toast('Remediation not found','error');
+}
+async function updateRemediation(id){openRemDetail(id);}
+async function deleteUser(username){if(!confirm('Delete user '+username+'?'))return;const r=await fetch('/api/auth/users/'+username,{method:'DELETE'}).then(r=>r.json()).catch(()=>null);toast(r?'Deleted':'Failed',r?'success':'error');}
+
+// ═══ REMEDIATIONS PAGE (V16.4.6) ═══
+let _remFilter='all';
+let _remData=[];
+function filterRem(f,btn){
+  _remFilter=f;
+  document.querySelectorAll('#rem-filters .btn').forEach(b=>b.classList.remove('active'));
+  if(btn)btn.classList.add('active');
+  renderRemGrid();
+}
+function renderRemGrid(){
+  let items=_remData;
+  const now=new Date();
+  if(_remFilter==='overdue')items=items.filter(r=>r.status!=='completed'&&r.deadline&&new Date(r.deadline)<now);
+  else if(_remFilter!=='all')items=items.filter(r=>r.status===_remFilter);
+  
+  const grid=document.getElementById('rem-grid');
+  if(!items.length){grid.innerHTML='<div class="empty">No remediation actions match this filter</div>';return;}
+  grid.innerHTML='<div class="grid-2">'+items.map(r=>{
     const st=r.status||'pending';
     const stCol=st==='completed'?'var(--green)':st==='in_progress'?'var(--cyan)':'var(--amber)';
-    return`<div class="card" style="padding:12px;">
-      <div style="display:flex;justify-content:space-between;align-items:center;">
-        <span class="font-bold">${r.title||r.action_type||'-'}</span>
-        <span class="tag" style="background:${stCol}22;color:${stCol};">${st}</span>
+    const overdue=r.deadline&&new Date(r.deadline)<now&&st!=='completed';
+    const slaStr=r.sla_hours?r.sla_hours+'h SLA':'';
+    const deadStr=r.deadline?new Date(r.deadline).toLocaleString():'';
+    const custStr=r.customer_name?'<span class="tag" style="font-size:10px;">'+r.customer_name+'</span>':'';
+    const sevStr=r.severity?'<span class="tag" style="font-size:10px;">'+r.severity+'</span>':'';
+    const iocStr=r.ioc_value?'<div class="mono text-xs" style="margin:4px 0;word-break:break-all;opacity:.7;">'+r.ioc_value.substring(0,80)+'</div>':'';
+    const sevC={'CRITICAL':'#c62828','HIGH':'#e65100','MEDIUM':'#f9a825','LOW':'#2e7d32'}[(r.severity||'').toUpperCase()]||'var(--amber)';
+    return`<div class="card" style="padding:14px;cursor:pointer;transition:all .2s;${overdue?'border-left:3px solid var(--red);':'border-left:3px solid '+sevC+';'}" onclick="openRemDetail(${r.id})" onmouseover="this.style.transform='translateY(-2px)';this.style.boxShadow='0 4px 16px rgba(0,0,0,.08)'" onmouseout="this.style.transform='';this.style.boxShadow=''">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+        <span class="font-bold" style="font-size:14px;">${r.title||r.action_type||'Remediation #'+r.id}</span>
+        <span class="tag" style="background:${stCol}22;color:${stCol};font-size:11px;">${overdue?'🚨 OVERDUE ':''}${st}</span>
       </div>
-      <div class="text-sm text-muted" style="margin:6px 0;">${r.description||'-'}</div>
-      <div style="display:flex;gap:4px;">
-        <button class="btn" style="font-size:10px;" onclick="toggleRemStatus(${r.id},'${st==='completed'?'pending':'completed'}')">
-          ${st==='completed'?'↩ Reopen':'✓ Complete'}
-        </button>
-        <button class="btn" style="font-size:10px;" onclick="updateRemediation(${r.id})">✏️ Edit</button>
+      <div style="display:flex;gap:6px;margin-bottom:4px;">${custStr}${sevStr}<span class="text-xs text-muted">${r.playbook_key||''}</span><span class="text-xs text-muted">${r.assigned_role?'→ '+r.assigned_role:''}</span></div>
+      ${iocStr}
+      ${r.steps_technical&&r.steps_technical.length?'<div style="font-size:12px;margin:6px 0;padding:8px;background:rgba(100,160,255,.05);border-radius:6px;max-height:60px;overflow:hidden;">'+r.steps_technical.slice(0,2).map(s=>'• '+s).join('<br>')+(r.steps_technical.length>2?'<br><span class="text-muted">+'+(r.steps_technical.length-2)+' more...</span>':'')+'</div>':''}
+      <div style="display:flex;gap:6px;align-items:center;margin-top:8px;">
+        <span class="text-xs text-muted">${slaStr} ${deadStr?'· Due: '+deadStr:''}</span>
+        <span style="margin-left:auto;font-size:10px;color:var(--orange);font-weight:700;">details →</span>
       </div>
     </div>`;
-  }).join('')+'</div>';}
-  showDrilldown('🔧 Remediation Actions',h);
+  }).join('')+'</div>';
 }
-async function createRemediation(){
-  const title=prompt('Remediation title:');if(!title)return;
-  const desc=prompt('Description (optional):');
-  const r=await apiPost('/api/remediations/',{title,description:desc||'',action_type:'manual',status:'pending'});
-  if(r&&!r.error){toast('Remediation created','success');loadRemediations();}else{toast('Failed','error');}
+async function loadRemPage(){
+  const [r,stats]=await Promise.all([api('/api/finding-remediations/'),api('/api/finding-remediations/stats')]);
+  _remData=r?.items||r||[];
+  const now=new Date();
+  const pending=_remData.filter(r=>r.status==='pending').length;
+  const inprog=_remData.filter(r=>r.status==='in_progress').length;
+  const done=_remData.filter(r=>r.status==='completed').length;
+  const overdue=_remData.filter(r=>r.status!=='completed'&&r.deadline&&new Date(r.deadline)<now).length;
+  document.getElementById('rem-stats').innerHTML=
+    `<div class="stat orange"><div class="stat-num orange">${pending}</div><div class="stat-lbl">Pending</div></div>
+    <div class="stat cyan"><div class="stat-num cyan">${inprog}</div><div class="stat-lbl">In Progress</div></div>
+    <div class="stat green"><div class="stat-num green">${done}</div><div class="stat-lbl">Completed</div></div>
+    <div class="stat red"><div class="stat-num red">${overdue}</div><div class="stat-lbl">Overdue</div></div>`;
+  renderRemGrid();
 }
-async function toggleRemStatus(id,newStatus){
-  const r=await fetch('/api/remediations/'+id+'/status',{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:newStatus})}).then(r=>r.json()).catch(()=>null);
-  if(r&&!r.error){toast('Status updated','success');loadRemediations();}else{toast('Update failed','error');}
+function openRemDetail(remId){
+  const r=_remData.find(x=>x.id===remId);
+  if(!r){toast('Remediation not found','error');return;}
+  const st=r.status||'pending';
+  const stCol=st==='completed'?'#2e7d32':st==='in_progress'?'#0097a7':'#e65c00';
+  const sevC={'CRITICAL':'#c62828','HIGH':'#e65100','MEDIUM':'#f9a825','LOW':'#2e7d32'}[(r.severity||'').toUpperCase()]||'#e65100';
+  const now=new Date();
+  const overdue=r.deadline&&new Date(r.deadline)<now&&st!=='completed';
+  let h=`<div style="display:flex;align-items:center;gap:14px;margin-bottom:16px;">
+    <div style="width:48px;height:48px;border-radius:12px;background:${stCol}10;display:flex;align-items:center;justify-content:center;font-size:24px;border:2px solid ${stCol}30;">${st==='completed'?'✅':st==='in_progress'?'🔄':'⏳'}</div>
+    <div style="flex:1;">
+      <div style="font-size:16px;font-weight:800;color:var(--text);">${r.title||r.action_type||'Remediation #'+r.id}</div>
+      <div style="font-size:12px;color:var(--text3);margin-top:2px;">${r.playbook_key||'manual'} · ${r.assigned_role||'unassigned'} · ${r.action_type||'-'}</div>
+    </div>
+    <div style="padding:6px 14px;border-radius:10px;font-size:12px;font-weight:800;background:${stCol}15;color:${stCol};border:1px solid ${stCol}30;">${overdue?'🚨 OVERDUE':''}${st.toUpperCase()}</div>
+  </div>`;
+  // Customer + severity + IOC
+  h+=`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px;">
+    ${r.customer_name?`<div style="padding:6px 12px;border-radius:8px;background:rgba(0,137,123,.06);border:1px solid rgba(0,137,123,.15);font-size:12px;color:var(--cyan);">🏢 ${r.customer_name}</div>`:''}
+    ${r.severity?`<div style="padding:6px 12px;border-radius:8px;background:${sevC}10;border:1px solid ${sevC}30;font-size:12px;font-weight:700;color:${sevC};">${r.severity}</div>`:''}
+    ${r.sla_hours?`<div style="padding:6px 12px;border-radius:8px;background:var(--surface);border:1px solid var(--border);font-size:12px;">⏱️ ${r.sla_hours}h SLA</div>`:''}
+    ${r.deadline?`<div style="padding:6px 12px;border-radius:8px;background:${overdue?'rgba(220,38,38,.06)':'var(--surface)'};border:1px solid ${overdue?'rgba(220,38,38,.2)':'var(--border)'};font-size:12px;${overdue?'color:#c62828;font-weight:700;':''}">📅 Due: ${new Date(r.deadline).toLocaleString()}</div>`:''}
+    ${r.finding_id?`<div style="padding:6px 12px;border-radius:8px;background:rgba(230,92,0,.06);border:1px solid rgba(230,92,0,.15);font-size:12px;color:var(--orange);cursor:pointer;" onclick="closeM('m-drilldown');openFi(${r.finding_id})">🎯 Finding #${r.finding_id} →</div>`:''}
+  </div>`;
+  // IOC value
+  if(r.ioc_value){
+    h+=`<div style="margin-bottom:14px;padding:10px 14px;border-radius:10px;background:#1a1a2e;border:1px solid #333;">
+      <div style="font-size:10px;color:#888;text-transform:uppercase;margin-bottom:4px;">IOC Value</div>
+      <div style="font-family:'JetBrains Mono';font-size:13px;color:#e0e0e0;word-break:break-all;">${escHtml(r.ioc_value)}</div>
+      ${r.ioc_type?`<div style="font-size:10px;color:#888;margin-top:4px;">Type: ${r.ioc_type}</div>`:''}
+    </div>`;
+  }
+  // Technical steps
+  if(r.steps_technical&&r.steps_technical.length){
+    h+=`<div style="margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:var(--orange);margin-bottom:8px;letter-spacing:1px;">🔧 Technical Response Steps (${r.steps_technical.length})</div>`;
+    r.steps_technical.forEach((s,i)=>{
+      h+=`<div style="display:flex;gap:10px;padding:10px 12px;margin-bottom:4px;border-radius:8px;background:rgba(230,92,0,.03);border:1px solid rgba(230,92,0,.08);">
+        <div style="width:24px;height:24px;border-radius:8px;background:var(--orange);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;flex-shrink:0;">${i+1}</div>
+        <div style="font-size:13px;color:var(--text);line-height:1.5;">${escHtml(s)}</div>
+      </div>`;
+    });
+    h+=`</div>`;
+  }
+  // Governance steps
+  if(r.steps_governance&&r.steps_governance.length){
+    h+=`<div style="margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#7b1fa2;margin-bottom:8px;letter-spacing:1px;">📋 Governance Steps</div>`;
+    r.steps_governance.forEach((s,i)=>{
+      h+=`<div style="padding:8px 12px;margin-bottom:3px;border-radius:8px;background:rgba(123,31,162,.03);border:1px solid rgba(123,31,162,.08);font-size:12px;color:var(--text);">${i+1}. ${escHtml(s)}</div>`;
+    });
+    h+=`</div>`;
+  }
+  // Evidence required
+  if(r.evidence_required&&r.evidence_required.length){
+    h+=`<div style="margin-bottom:14px;">
+      <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#1565c0;margin-bottom:8px;letter-spacing:1px;">📎 Evidence Required</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        ${r.evidence_required.map(e=>`<span style="padding:4px 10px;border-radius:8px;background:rgba(21,101,192,.06);border:1px solid rgba(21,101,192,.12);font-size:12px;color:#1565c0;">${escHtml(e)}</span>`).join('')}
+      </div></div>`;
+  }
+  // Action buttons
+  h+=`<div style="display:flex;gap:8px;margin-top:16px;padding-top:16px;border-top:1px solid var(--border);">
+    ${st==='pending'?`<button class="btn pri" style="font-size:12px;" onclick="toggleFindingRemStatus(${r.finding_id},${r.id},'in_progress');closeM('m-drilldown');setTimeout(loadRemPage,500)">▶ Start Working</button>`:''}
+    ${st==='in_progress'?`<button class="btn pri" style="font-size:12px;background:linear-gradient(135deg,#2e7d32,#43a047);" onclick="toggleFindingRemStatus(${r.finding_id},${r.id},'completed');closeM('m-drilldown');setTimeout(loadRemPage,500)">✅ Mark Complete</button>`:''}
+    ${st==='completed'?`<button class="btn" style="font-size:12px;" onclick="toggleFindingRemStatus(${r.finding_id},${r.id},'pending');closeM('m-drilldown');setTimeout(loadRemPage,500)">↩ Reopen</button>`:''}
+    ${r.finding_id?`<button class="btn" style="font-size:12px;" onclick="closeM('m-drilldown');openFi(${r.finding_id})">🎯 View Finding</button>`:''}
+  </div>`;
+  showDrilldown('🔧 Remediation #'+r.id,h);
 }
-async function updateRemediation(id){
-  const title=prompt('New title (or cancel):');if(!title)return;
-  const r=await fetch('/api/remediations/'+id,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({title})}).then(r=>r.json()).catch(()=>null);
-  if(r&&!r.error){toast('Updated','success');loadRemediations();}else{toast('Update failed','error');}
+async function createRemediationGlobal(){
+  // Show inline form in drilldown instead of ugly browser prompt
+  let h=`<div style="padding:8px 0;">
+    <div style="margin-bottom:14px;">
+      <label style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;display:block;margin-bottom:6px;">Title *</label>
+      <input id="rem-new-title" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:14px;box-sizing:border-box;" placeholder="e.g. Reset compromised credentials for Starbucks">
+    </div>
+    <div style="margin-bottom:14px;">
+      <label style="font-size:12px;font-weight:700;color:var(--text3);text-transform:uppercase;display:block;margin-bottom:6px;">Description</label>
+      <textarea id="rem-new-desc" rows="3" style="width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font-size:13px;box-sizing:border-box;resize:vertical;" placeholder="Optional details about what needs to be done"></textarea>
+    </div>
+    <div style="display:flex;gap:8px;">
+      <button class="btn pri" style="flex:1;" onclick="submitNewRemediation()">🔧 Create Remediation</button>
+      <button class="btn" onclick="closeM('m-drilldown')">Cancel</button>
+    </div>
+  </div>`;
+  showDrilldown('🔧 Create New Remediation',h);
+  setTimeout(()=>document.getElementById('rem-new-title')?.focus(),100);
 }
-async function deleteUser(username){if(!confirm('Delete user '+username+'?'))return;const r=await fetch('/api/auth/users/'+username,{method:'DELETE'}).then(r=>r.json()).catch(()=>null);toast(r?'Deleted':'Failed',r?'success':'error');}
+async function submitNewRemediation(){
+  const title=document.getElementById('rem-new-title')?.value?.trim();
+  const desc=document.getElementById('rem-new-desc')?.value?.trim();
+  if(!title){toast('Title is required','error');return;}
+  const r=await apiPost('/api/finding-remediations/create',{title,description:desc||'',action_type:'manual',status:'pending'});
+  if(r&&!r.error){toast('Remediation created','success');closeM('m-drilldown');loadRemPage();}
+  else{toast('Failed: '+(r?.error||r?.detail||'unknown'),'error');}
+}
+async function toggleFindingRemStatus(findingId,remId,newStatus){
+  const r=await fetch('/api/findings/'+findingId+'/remediations/'+remId+'?status='+newStatus,{method:'PATCH',headers:{'Content-Type':'application/json'}}).then(r=>r.json()).catch(()=>null);
+  if(r&&!r.error){toast('Remediation → '+newStatus,'success');setTimeout(loadRemPage,300);}else{toast('Update failed','error');}
+}
 
 async function loadSet(){
   const [ai,cols,ent,fpStats]=await Promise.all([api('/api/settings/ai'),api('/api/collectors/status'),api('/api/enterprise/status'),api('/api/fp-patterns/stats')]);
@@ -3495,6 +3892,7 @@ async function loadSet(){
       {id:'socradar',name:'SocRadar',desc:'Brand monitoring  -  your customer mentioned on dark web?',placeholder:'SocRadar API key',color:'#7b1fa2',url:'https://platform.socradar.com/',price:'Enterprise'},
       {id:'shodan',name:'Shodan',desc:'Internet-wide scanning & exposure detection',placeholder:'Shodan API key',color:'#c62828',url:'https://account.shodan.io/',price:'$69/mo'},
       {id:'virustotal',name:'VirusTotal',desc:'Multi-engine malware scanning & URL analysis',placeholder:'VT API key',color:'#e65100',url:'https://www.virustotal.com/gui/my-apikey',price:'Free tier'},
+      {id:'abuseipdb',name:'AbuseIPDB',desc:'IP address abuse reporting & reputation checking  -  1000 checks/day free',placeholder:'AbuseIPDB API key',color:'#c62828',url:'https://www.abuseipdb.com/account/api',price:'Free tier'},
       {id:'intelx',name:'IntelX',desc:'Intelligence X  -  dark web & leak search',placeholder:'IntelX API key',color:'#7b1fa2',url:'https://intelx.io/account?tab=developer',price:'€3K/yr'},
       {id:'censys',name:'Censys',desc:'Internet asset discovery and monitoring',placeholder:'Censys API ID:Secret',color:'#1565c0',url:'https://search.censys.io/account/api',price:'Free tier'},
       {id:'greynoise',name:'GreyNoise',desc:'Internet background noise classification',placeholder:'GreyNoise API key',color:'#2e7d32',url:'https://viz.greynoise.io/account/api-key',price:'Free tier'},
@@ -3907,8 +4305,45 @@ async function sendBarAI(){
     }
     return;
   }
-  resp.innerHTML=`<div style="display:flex;align-items:center;gap:8px;color:var(--text3);"><span class="loading-spin" style="display:inline-block;width:16px;height:16px;border:2px solid var(--border2);border-top-color:#e65c00;border-radius:50%;animation:spin .6s linear infinite;"></span> Analyzing your threat landscape...</div>`;
+  resp.innerHTML=`<div id="ai-loading" style="padding:16px 20px;border-radius:14px;background:linear-gradient(135deg,rgba(230,92,0,.04),rgba(0,137,123,.03));border:1.5px solid rgba(230,92,0,.12);">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+      <div style="width:32px;height:32px;border-radius:10px;background:linear-gradient(135deg,rgba(230,92,0,.15),rgba(0,137,123,.1));display:flex;align-items:center;justify-content:center;"><span class="loading-spin" style="display:inline-block;width:16px;height:16px;border:2px solid rgba(230,92,0,.2);border-top-color:#e65c00;border-radius:50%;animation:spin .6s linear infinite;"></span></div>
+      <div style="flex:1;">
+        <div style="font-size:13px;font-weight:800;color:var(--text);">ArgusWatch Agentic AI</div>
+        <div style="font-size:11px;color:var(--text3);" id="ai-loading-status">Analyzing threat landscape with ${_aiProvider==='ollama'?'🦙 Qwen (local)':_aiProvider==='anthropic'?'🟣 Claude':_aiProvider==='openai'?'🤖 GPT':'💎 Gemini'}...</div>
+      </div>
+      <div style="text-align:right;">
+        <div style="font-size:18px;font-weight:900;font-family:'JetBrains Mono';color:var(--orange);" id="ai-countdown">0s</div>
+        <div style="font-size:9px;color:var(--text4);text-transform:uppercase;">elapsed</div>
+      </div>
+    </div>
+    <div style="height:4px;border-radius:4px;background:rgba(230,92,0,.08);overflow:hidden;">
+      <div id="ai-progress-bar" style="height:100%;border-radius:4px;background:linear-gradient(90deg,#e65c00,#ff8c42,#00897b);width:0%;transition:width .5s ease;"></div>
+    </div>
+    <div style="display:flex;gap:12px;margin-top:8px;font-size:10px;color:var(--text4);">
+      <span>📡 Querying ${_stats?.total_detections||'...'} detections</span>
+      <span>🏢 ${_stats?.active_customers||'...'} customers</span>
+      <span>🎭 Matching actors to industries</span>
+    </div>
+  </div>`;
+  // Countdown timer
+  const _aiStart=Date.now();
+  const _maxTime=_aiProvider==='ollama'?90:15;
+  const _aiTimer=setInterval(()=>{
+    const elapsed=Math.floor((Date.now()-_aiStart)/1000);
+    const el=document.getElementById('ai-countdown');
+    const bar=document.getElementById('ai-progress-bar');
+    const status=document.getElementById('ai-loading-status');
+    if(el)el.textContent=elapsed+'s';
+    if(bar)bar.style.width=Math.min(elapsed/_maxTime*100,95)+'%';
+    if(status&&elapsed>5&&elapsed<15)status.textContent='Building context from customer data...';
+    if(status&&elapsed>=15&&elapsed<30)status.textContent='AI is reasoning about threats...';
+    if(status&&elapsed>=30&&elapsed<60)status.textContent='Deep analysis in progress (local models take 30-90s)...';
+    if(status&&elapsed>=60)status.textContent='Almost done — complex query processing...';
+  },500);
   const r=await apiPost('/api/ai/query',{query:q,provider:_aiProvider});
+  clearInterval(_aiTimer);
+  const _aiElapsed=((Date.now()-_aiStart)/1000).toFixed(1);
   let answer=r?.response||r?.answer||r?.content||'';
   if(!answer||answer.includes('No response')||answer.includes('No AI provider configured')){
     const st=_stats||{};const ql=q.toLowerCase();
@@ -3980,8 +4415,41 @@ async function sendBarAI(){
         </div></div>`;
     }
   }
-  resp.innerHTML=answer;
-  if(msgs){msgs.innerHTML+=`<div class="ai-msg bot">${answer}</div>`;msgs.scrollTop=msgs.scrollHeight;}
+  // Wrap AI-generated answers in a styled card (skip for builtin HTML cards that already have styling)
+  const isBuiltinCard=answer.includes('border-left:')&&answer.includes('border-radius:10px');
+  const provLabel=r?.provider==='ollama'?'🦙 Qwen (Local)':r?.provider==='anthropic'?'🟣 Claude':r?.provider==='openai'?'🤖 GPT-4o':r?.provider==='google'?'💎 Gemini':r?.provider||'system';
+  const modelName=r?.model||'';
+  if(answer&&!isBuiltinCard){
+    // Format markdown-like text
+    let formatted=escHtml(answer)
+      .replace(/\*\*(.*?)\*\*/g,'<b>$1</b>')
+      .replace(/\n- /g,'<br>• ')
+      .replace(/\n\d+\. /g,(m)=>'<br>'+m.trim()+' ')
+      .replace(/\n/g,'<br>');
+    resp.innerHTML=`<div style="border-radius:14px;border:1.5px solid rgba(230,92,0,.12);overflow:hidden;">
+      <div style="padding:14px 18px;background:linear-gradient(135deg,rgba(230,92,0,.06),rgba(0,137,123,.03));">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="width:28px;height:28px;border-radius:8px;background:linear-gradient(135deg,#e65c00,#ff8c42);display:flex;align-items:center;justify-content:center;font-size:14px;color:#fff;font-weight:800;">⚡</div>
+          <div style="flex:1;">
+            <div style="font-size:13px;font-weight:800;background:linear-gradient(135deg,#e65c00,#00897b);-webkit-background-clip:text;-webkit-text-fill-color:transparent;">ArgusWatch Agentic AI</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px;">
+            <span style="padding:3px 8px;border-radius:6px;background:rgba(230,92,0,.08);font-size:10px;font-weight:700;color:var(--orange);">${provLabel}</span>
+            <span style="padding:3px 8px;border-radius:6px;background:rgba(0,137,123,.08);font-size:10px;font-weight:700;color:var(--cyan);">${_aiElapsed}s</span>
+          </div>
+        </div>
+      </div>
+      <div style="padding:16px 18px;font-size:14px;color:var(--text);line-height:1.7;">${formatted}</div>
+      ${modelName&&modelName!=='error'&&modelName!=='offline'&&modelName!=='slow'?`<div style="padding:8px 18px;border-top:1px solid rgba(230,92,0,.08);font-size:10px;color:var(--text4);display:flex;gap:12px;">
+        <span>Model: ${modelName}</span>
+        <span>Response: ${_aiElapsed}s</span>
+        <span>Provider: ${r?.provider||'?'}</span>
+      </div>`:''}
+    </div>`;
+  } else {
+    resp.innerHTML=answer;
+  }
+  if(msgs){msgs.innerHTML+=`<div class="ai-msg bot">${resp.innerHTML}</div>`;msgs.scrollTop=msgs.scrollHeight;}
 }
 
 
@@ -4435,21 +4903,41 @@ async function drillDarkWeb(){
   if(Object.keys(bySrc).length){
     h+=`<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text3);margin-bottom:8px;">By Source</div>`;
     Object.entries(bySrc).sort((a,b)=>b[1]-a[1]).forEach(([src,ct])=>{
-      const _srcEmoji={'telegram':'📱','paste':'📋','forum':'💬','market':'🛒','stealer_log':'🔑','leak':'💧'};
-      h+=`<div style="display:flex;align-items:center;gap:10px;margin:6px 0;padding:8px 12px;border-radius:8px;border:1px solid var(--border);">
+      const _srcEmoji={'telegram':'📱','paste':'📋','forum':'💬','market':'🛒','stealer_log':'🔑','leak':'💧','ransomfeed':'🔴','ransomwatch':'🔴','ahmia':'🌑'};
+      h+=`<div style="display:flex;align-items:center;gap:10px;margin:6px 0;padding:8px 12px;border-radius:8px;border:1px solid var(--border);cursor:pointer;transition:all .2s;" onclick="closeM('m-drilldown');go('darkweb');setTimeout(()=>loadDW('${src}'),300)" onmouseover="this.style.borderColor='#7b1fa2';this.style.background='rgba(123,31,162,.04)'" onmouseout="this.style.borderColor='var(--border)';this.style.background=''">
         <span style="font-size:18px;">${_srcEmoji[src]||'🌐'}</span>
         <span style="font-size:13px;font-weight:700;color:var(--text);flex:1;">${src}</span>
         <span style="font-size:16px;font-weight:900;font-family:'JetBrains Mono';color:#7b1fa2;">${ct}</span>
+        <span style="font-size:10px;color:var(--orange);">→</span>
       </div>`;
     });
   }
-  // Recent mentions
+  // Recent mentions — clickable cards
   if(mentions.length){
-    h+=`<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:16px 0 8px;">Recent Mentions</div>`;
-    mentions.slice(0,8).forEach(m=>{
-      h+=`<div style="padding:10px 12px;border-radius:8px;border:1px solid var(--border);margin:4px 0;font-size:13px;">
-        <div style="font-family:'JetBrains Mono';color:#7b1fa2;font-weight:700;margin-bottom:3px;">${m.keyword||m.value||m.mention||'-'}</div>
-        <div style="font-size:11px;color:var(--text4);">🏢 ${m.customer_name||'-'} · 📡 ${m.source||'-'} · 🕐 ${m.found_at||m.created_at||'-'}</div>
+    // Store in _dwItems so openDWDetail works
+    _dwItems=mentions;
+    h+=`<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:var(--text3);margin:16px 0 8px;">Recent Mentions (click for details)</div>`;
+    mentions.slice(0,10).forEach(m=>{
+      const isRansom=m.source==='ransomwatch'||m.source==='ransomfeed'||m.mention_type==='ransomware_claim';
+      const isPaste=m.source==='paste'||(m.mention_type||'').includes('paste');
+      const sevColor=isRansom?'#dc2626':isPaste?'#ea580c':'#7c3aed';
+      const typeIcon=isRansom?'🔴':isPaste?'📋':'🌐';
+      const title=(m.content||m.title||m.keyword||m.value||m.mention||'Untitled').substring(0,120);
+      const hasId=m.id!=null;
+      h+=`<div style="padding:12px 14px;border-radius:10px;border:1px solid ${sevColor}20;margin:6px 0;cursor:pointer;transition:all .2s;background:${sevColor}03;" ${hasId?`onclick="closeM('m-drilldown');go('darkweb');setTimeout(()=>openDWDetail(${m.id}),500)"`:'onclick="closeM(\'m-drilldown\');go(\'darkweb\')"'} onmouseover="this.style.borderColor='${sevColor}';this.style.transform='translateX(4px)';this.style.background='${sevColor}08'" onmouseout="this.style.borderColor='${sevColor}20';this.style.transform='';this.style.background='${sevColor}03'">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <span style="font-size:16px;">${typeIcon}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:13px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escHtml(title)}</div>
+            <div style="font-size:11px;color:var(--text4);margin-top:2px;">
+              ${m.customer_name?'🏢 '+escHtml(m.customer_name)+' · ':''}📡 ${m.source||'-'} 
+              ${m.threat_actor?' · 🎭 '+escHtml(m.threat_actor):''}
+              ${m.ai_summary?' · 🤖 AI triaged':''}
+            </div>
+          </div>
+          <span style="font-size:10px;color:${sevColor};font-weight:700;">details →</span>
+        </div>
+        ${m.ai_summary?`<div style="margin-top:6px;padding:6px 10px;border-radius:6px;background:rgba(230,92,0,.04);border-left:2px solid var(--orange);font-size:11px;color:var(--text2);">🤖 ${escHtml((m.ai_summary||'').substring(0,100))}</div>`:''}
       </div>`;
     });
   }
@@ -4899,29 +5387,31 @@ async function refreshActivity(){
     activeCollectors.forEach(c=>{
       const cnt=c.ioc_count||c.count||0;
       const nm=c.name||c.id||'';
-      items.push({dot:'ok',text:`<span style="color:#a89880;">${nm}</span> <span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${cnt.toLocaleString()}</span> <span style="color:#8c7a65;">IOCs</span>`});
+      items.push({dot:'ok',click:'detections',text:`<span style="color:#a89880;">${nm}</span> <span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${cnt.toLocaleString()}</span> <span style="color:#8c7a65;">IOCs</span>`});
     });
     // Stats-based events
     if(stats){
-      if(stats.total_detections)items.push({dot:'ok',text:`<span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${stats.total_detections.toLocaleString()}</span> <span style="color:#a89880;">detections</span>`});
-      if(stats.active_customers)items.push({dot:'ok',text:`<span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${stats.active_customers}</span> <span style="color:#a89880;">customers monitored</span>`});
-      if(stats.critical_findings)items.push({dot:'warn',text:`<span style="color:#e65100;font-family:'JetBrains Mono';font-weight:800;">${stats.critical_findings}</span> <span style="color:#a89880;">critical findings</span>`});
-      if(stats.total_actors)items.push({dot:'ok',text:`<span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${stats.total_actors}</span> <span style="color:#a89880;">MITRE actors</span>`});
+      if(stats.total_detections)items.push({dot:'ok',click:'detections',text:`<span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${stats.total_detections.toLocaleString()}</span> <span style="color:#a89880;">detections</span>`});
+      if(stats.active_customers)items.push({dot:'ok',click:'customers',text:`<span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${stats.active_customers}</span> <span style="color:#a89880;">customers monitored</span>`});
+      if(stats.critical_findings)items.push({dot:'warn',click:'findings',text:`<span style="color:#e65100;font-family:'JetBrains Mono';font-weight:800;">${stats.critical_findings}</span> <span style="color:#a89880;">critical findings</span>`});
+      if(stats.total_actors)items.push({dot:'ok',click:'actors',text:`<span style="color:#f5f0e8;font-family:'JetBrains Mono';font-weight:800;">${stats.total_actors}</span> <span style="color:#a89880;">MITRE actors</span>`});
     }
     // AI status
     try{
       const aiSt=await api('/api/settings/ai');
       if(aiSt){
         const prov=aiSt.active_provider||aiSt.provider||'ollama';
-        items.unshift({dot:'ok',text:`<span style="color:#a89880;">AI:</span> <span style="color:#f5f0e8;font-weight:800;">${prov}</span> <span style="color:#8c7a65;">(${aiSt.model||'qwen2.5:14b'})</span>`});
+        items.unshift({dot:'ok',click:'settings',text:`<span style="color:#a89880;">AI:</span> <span style="color:#f5f0e8;font-weight:800;">${prov}</span> <span style="color:#8c7a65;">(${aiSt.model||'qwen2.5:14b'})</span>`});
       }
     }catch(e){}
     // Render  -  bigger items, no timestamps, card-like
     el.innerHTML=items.slice(0,7).map(i=>{
       const dotCls=i.dot==='ok'?'background:#2e7d32;box-shadow:0 0 6px #2e7d32;':i.dot==='warn'?'background:#e65100;box-shadow:0 0 6px #e65100;':'background:#9e9e9e;';
-      return`<div style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.04);color:#d4c8b8;font-size:13px;font-weight:600;transition:background .2s;" onmouseover="this.style.background='rgba(255,255,255,.06)'" onmouseout="this.style.background='rgba(255,255,255,.03)'">
+      const click=i.click?`onclick="go('${i.click}')" style="cursor:pointer;`:`style="`;
+      return`<div ${click}display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:3px;border-radius:8px;background:rgba(255,255,255,.03);border:1px solid rgba(255,255,255,.04);color:#d4c8b8;font-size:13px;font-weight:600;transition:all .2s;" onmouseover="this.style.background='rgba(255,255,255,.08)';this.style.borderColor='rgba(255,255,255,.1)'" onmouseout="this.style.background='rgba(255,255,255,.03)';this.style.borderColor='rgba(255,255,255,.04)'">
         <span style="width:7px;height:7px;border-radius:50%;${dotCls}flex-shrink:0;"></span>
         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${i.text}</span>
+        ${i.click?'<span style="font-size:9px;color:#6b5b48;">&#8250;</span>':''}
       </div>`;
     }).join('');
   }catch(e){

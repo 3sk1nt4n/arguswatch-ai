@@ -129,9 +129,13 @@ def _ip_in_any_cidr(ip_str: str, cidrs: list):
         ip = ipaddress.ip_address(ip_str.strip())
     except ValueError:
         return None
-    for network in cidrs:
-        if ip in network:
-            return network
+    for cidr in cidrs:
+        try:
+            network = ipaddress.ip_network(cidr.strip(), strict=False) if isinstance(cidr, str) else cidr
+            if ip in network:
+                return str(cidr)
+        except (ValueError, TypeError):
+            continue
     return None
 
 
@@ -256,7 +260,10 @@ async def match_customer_intel(customer_id: int, db: AsyncSession) -> dict:
                 except Exception:
                     pass
 
-    tech_stack = [(a.asset_value, a) for a in assets if a.asset_type in ("tech_stack",)]
+    # V16.4.6: Skip unconfirmed industry defaults from tech_stack matching
+    tech_stack = [(a.asset_value, a) for a in assets
+                  if a.asset_type in ("tech_stack",)
+                  and getattr(a, "discovery_source", None) != "industry_default"]
     keywords = [a.asset_value.lower() for a in assets
                 if a.asset_type in ("keyword", "brand_name", "org_name")]
     email_domains = set()
@@ -325,6 +332,13 @@ async def match_customer_intel(customer_id: int, db: AsyncSession) -> dict:
     # Add email domains for credential leak matching
     all_domains.update(email_domains)
     
+    # V16.4.5: IOC types that carry their own domain identity.
+    # URL/domain/email IOCs must match on their OWN value, never raw_text context.
+    DOMAIN_BEARING_IOC_TYPES = frozenset({
+        "url", "uri", "domain", "fqdn", "hostname", "email",
+        "subdomain", "malicious_url_path", "s3_public_url",
+    })
+
     if all_domains:
         # Only match domains with 5+ characters to avoid false positives
         safe_domains = [d for d in all_domains if len(d) >= 5]
@@ -348,7 +362,14 @@ async def match_customer_intel(customer_id: int, db: AsyncSession) -> dict:
                 # BOUNDARY CHECK - not raw substring
                 corr_type = _domain_matches_ioc(domain, det.ioc_value)
                 if not corr_type:
-                    # Check raw_text with boundary matching
+                    # V16.4.5: ONLY allow raw_text fallback for NON-domain-bearing IOCs.
+                    # URL/domain/email IOCs must match on their OWN value.
+                    # Before this fix, a gist mentioning "github.com" caused ALL IOCs
+                    # from that gist (hostingmalaya.com, googleapis.com, etc.)
+                    # to be attributed to GitHub. This was the #1 false positive source.
+                    if det.ioc_type in DOMAIN_BEARING_IOC_TYPES:
+                        continue  # URL/domain IOC must match on its own value
+                    # For hashes/CVEs/advisories: check raw_text with boundary matching
                     if _domain_in_text(domain, det.raw_text):
                         corr_type = "keyword"
                     else:
@@ -505,8 +526,13 @@ async def match_customer_intel(customer_id: int, db: AsyncSession) -> dict:
                 # GLOBAL EXCLUSION: financial PII never attributed to customers
                 if det.ioc_type in GLOBAL_ONLY_IOC_TYPES:
                     continue
+                # V16.4.5: URL/domain IOCs must contain the brand term in their value,
+                # not just in surrounding raw_text context.
+                if det.ioc_type in DOMAIN_BEARING_IOC_TYPES:
+                    if not _domain_in_text(term, det.ioc_value):
+                        continue  # Brand not in URL itself - skip
                 # Boundary check: short brand terms must appear as whole word
-                if len(term) < 8:
+                elif len(term) < 8:
                     if not _domain_in_text(term, det.raw_text or det.ioc_value):
                         continue
                 det.customer_id = customer_id
@@ -536,14 +562,33 @@ async def match_customer_intel(customer_id: int, db: AsyncSession) -> dict:
 
     stats["context_matches"] = 0
 
+    # V16.4.5: Only cascade from HIGH-CONFIDENCE matches.
+    # Before: any "keyword" match from raw_text triggered cascade that attributed
+    # 50+ unrelated IOCs from the same text. This was the #1 false positive amplifier.
+    # After: only cascade from exact_domain, exact_ip, subdomain, tech_stack, cidr matches.
+    HIGH_CONFIDENCE_CORR_TYPES = frozenset({
+        "exact_domain", "exact_ip", "exact_email", "subdomain",
+        "ip_range", "tech_stack", "email_pattern",
+    })
+    high_conf_det_ids = []
     if stats["matched_detection_ids"]:
+        # Filter to only high-confidence matches for cascading
+        hc_r = await db.execute(
+            select(Detection.id).where(
+                Detection.id.in_(stats["matched_detection_ids"][:200]),
+                Detection.correlation_type.in_(HIGH_CONFIDENCE_CORR_TYPES),
+            )
+        )
+        high_conf_det_ids = [row[0] for row in hc_r.all()]
+
+    if high_conf_det_ids:
         from arguswatch.engine.pattern_matcher import scan_text as pm_scan
 
         # PHASE A: Raw text proximity - scan matched detection's raw_text
         # for additional IOCs, then find unmatched detections with those values
         matched_r = await db.execute(
             select(Detection).where(
-                Detection.id.in_(stats["matched_detection_ids"][:100]),
+                Detection.id.in_(high_conf_det_ids[:100]),
             )
         )
         matched_dets = matched_r.scalars().all()

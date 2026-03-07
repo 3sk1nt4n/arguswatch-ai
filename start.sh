@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -e
 echo "═══════════════════════════════════════════════════"
-echo "  ArgusWatch AI-Agentic Threat Intelligence v16.4.1"
+echo "  ArgusWatch AI-Agentic Threat Intelligence v16.4.6"
 echo "  Solvent CyberSecurity LLC"
 echo "═══════════════════════════════════════════════════"
 if ! docker info > /dev/null 2>&1; then

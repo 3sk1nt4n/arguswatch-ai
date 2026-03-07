@@ -55,7 +55,7 @@ def _simple_edit_distance(a: str, b: str) -> int:
 
 
 def _extract_domain_from_ioc(ioc_value: str, ioc_type: str) -> str | None:
-    """Pull the domain portion from a URL, email, or domain IOC."""
+    """Pull the domain portion from a URL, email, connection string, or domain IOC."""
     if ioc_type in ("domain", "fqdn", "hostname"):
         return ioc_value.lower()
     if ioc_type == "email":
@@ -65,6 +65,19 @@ def _extract_domain_from_ioc(ioc_value: str, ioc_type: str) -> str | None:
         m = re.search(r"https?://([^/?\s:]+)", ioc_value)
         if m:
             return m.group(1).lower()
+    # V16.4.6: Extract hostname from connection strings (postgresql://user:pass@host:port/db)
+    if ioc_type in ("db_connection_string", "remote_credential", "dev_tunnel_exposed"):
+        # Strip scheme, then take everything after the last @ (handles passwords with @)
+        no_scheme = re.sub(r'^[a-z]+://', '', ioc_value)
+        if '@' in no_scheme:
+            after_at = no_scheme.rsplit('@', 1)[1]  # rsplit: last @ only
+        else:
+            after_at = no_scheme
+        m = re.match(r'([^/:?\s]+)', after_at)
+        if m:
+            host = m.group(1).lower()
+            if host not in ("localhost", "127.0.0.1", "0.0.0.0") and not host.startswith("192.168.") and not host.startswith("10."):
+                return host
     return None
 
 
@@ -78,12 +91,26 @@ def route_to_customers(
     ioc_lower = ioc_value.lower()
     ioc_domain = _extract_domain_from_ioc(ioc_value, ioc_type)
 
+    # V16.4.5: IOC types that carry their own domain identity.
+    # These should ONLY match on domain/subdomain/ip assets, NEVER on keyword/brand.
+    # Before this fix: "github" keyword matched ANY URL found in a GitHub Gist,
+    # causing hostingmalaya.com, almagems.com, googleapis.com etc. to route to GitHub.
+    DOMAIN_ONLY_IOC_TYPES = {"url", "uri", "domain", "fqdn", "hostname", "email",
+                             "subdomain", "malicious_url_path", "s3_public_url"}
+    DOMAIN_ONLY_ASSET_TYPES = {"domain", "subdomain", "ip", "cidr", "email",
+                               "email_domain", "cloud_asset", "code_repo", "github_org",
+                               "brand_name"}  # brand_name has its own domain-only logic
+
     for asset in assets:
         av = asset.asset_value.lower()
         matched = False
         corr_type = "keyword"
 
         atype = asset.asset_type
+
+        # Skip keyword/brand/org matching entirely for URL-like IOCs
+        if ioc_type in DOMAIN_ONLY_IOC_TYPES and atype not in DOMAIN_ONLY_ASSET_TYPES:
+            continue
 
         # ── domain ──────────────────────────────────────────────────────────
         if atype == "domain":
@@ -92,14 +119,19 @@ def route_to_customers(
                     matched, corr_type = True, "exact_domain"
                 elif ioc_domain.endswith("." + av):
                     matched, corr_type = True, "subdomain"
-            elif av in ioc_lower:
-                matched, corr_type = True, "exact_domain"
+            # V16.4.5: Removed dangerous `elif av in ioc_lower` fallback.
+            # It caused ANY IOC text containing "github.com" to match GitHub.
+            # Domain matching must ONLY work on extracted domain portions.
 
         # ── subdomain ────────────────────────────────────────────────────────
         elif atype == "subdomain":
-            if ioc_domain and (ioc_domain == av or av in ioc_domain):
+            # V16.4.5: Only match on domain-level, never raw text substring.
+            # Before: av in ioc_lower matched ANY text mentioning the subdomain.
+            # After: only match if extracted domain matches the subdomain.
+            if ioc_domain and (ioc_domain == av or ioc_domain.endswith("." + av)):
                 matched, corr_type = True, "subdomain"
-            elif av in ioc_lower:
+            elif ioc_domain and av.endswith(ioc_domain):
+                # IOC domain is parent of this subdomain
                 matched, corr_type = True, "subdomain"
 
         # ── ip ───────────────────────────────────────────────────────────────
@@ -130,17 +162,31 @@ def route_to_customers(
 
         # ── keyword ───────────────────────────────────────────────────────────
         elif atype == "keyword":
-            if av in ioc_lower:
-                matched, corr_type = True, "keyword"
+            # V16.4.5b: For URL/domain IOCs, keyword must appear in the DOMAIN portion only.
+            # Before: "github" keyword matched any URL from a gist mentioning github.
+            # After: "github" only matches URLs where github is in the domain.
+            if ioc_type in ("url", "uri", "domain", "fqdn"):
+                # Only match keyword against the domain portion of the URL
+                if ioc_domain and len(av) >= 4 and re.search(r'\b' + re.escape(av) + r'\b', ioc_domain):
+                    matched, corr_type = True, "keyword"
+            else:
+                # Non-URL IOCs: word boundary match on full value
+                if len(av) >= 4 and re.search(r'\b' + re.escape(av) + r'\b', ioc_lower):
+                    matched, corr_type = True, "keyword"
 
         # ── org_name ──────────────────────────────────────────────────────────
         elif atype == "org_name":
-            if av in ioc_lower:
-                matched, corr_type = True, "keyword"
+            if ioc_type in ("url", "uri", "domain", "fqdn"):
+                if ioc_domain and len(av) >= 4 and re.search(r'\b' + re.escape(av) + r'\b', ioc_domain):
+                    matched, corr_type = True, "keyword"
+            else:
+                if len(av) >= 4 and re.search(r'\b' + re.escape(av) + r'\b', ioc_lower):
+                    matched, corr_type = True, "keyword"
 
         # ── github_org ────────────────────────────────────────────────────────
         elif atype == "github_org":
-            if av in ioc_lower:
+            # V16.4.5: Must match in a github URL context, not just substring
+            if "github.com/" + av in ioc_lower or "github.com/orgs/" + av in ioc_lower:
                 matched, corr_type = True, "code_repo"
 
         # ── tech_stack (V10) ──────────────────────────────────────────────────
@@ -148,20 +194,30 @@ def route_to_customers(
         elif atype == "tech_stack":
             # Extract product name (first word or two before version)
             product = re.split(r"\s+\d", av)[0].lower()  # "fortiOS" from "FortiOS 7.2"
-            if len(product) >= 4 and product in ioc_lower:
+            if len(product) >= 4 and re.search(r'\b' + re.escape(product) + r'\b', ioc_lower):
                 matched, corr_type = True, "tech_stack"
 
         # ── brand_name (V10) ──────────────────────────────────────────────────
         # "AcmePay" → match exact + typosquat variants
         elif atype == "brand_name":
-            if av in ioc_lower:
-                matched, corr_type = True, "keyword"
-            elif ioc_domain:
-                # Check typosquat: is the IOC domain 1-2 edits from the brand?
-                brand_clean = re.sub(r"[^a-z0-9]", "", av)
-                ioc_clean = re.sub(r"[^a-z0-9]", "", ioc_domain.split(".")[0])
-                if len(brand_clean) >= 4 and _simple_edit_distance(brand_clean, ioc_clean) <= 2:
-                    matched, corr_type = True, "typosquat"
+            # V16.4.5b: For URL IOCs, only match brand in domain portion
+            if ioc_type in ("url", "uri", "domain", "fqdn"):
+                if ioc_domain and len(av) >= 4 and re.search(r'\b' + re.escape(av) + r'\b', ioc_domain):
+                    matched, corr_type = True, "keyword"
+                elif ioc_domain:
+                    # Check typosquat: is the IOC domain 1-2 edits from the brand?
+                    brand_clean = re.sub(r"[^a-z0-9]", "", av)
+                    ioc_clean = re.sub(r"[^a-z0-9]", "", ioc_domain.split(".")[0])
+                    if len(brand_clean) >= 4 and _simple_edit_distance(brand_clean, ioc_clean) <= 2:
+                        matched, corr_type = True, "typosquat"
+            else:
+                if len(av) >= 4 and re.search(r'\b' + re.escape(av) + r'\b', ioc_lower):
+                    matched, corr_type = True, "keyword"
+                elif ioc_domain:
+                    brand_clean = re.sub(r"[^a-z0-9]", "", av)
+                    ioc_clean = re.sub(r"[^a-z0-9]", "", ioc_domain.split(".")[0])
+                    if len(brand_clean) >= 4 and _simple_edit_distance(brand_clean, ioc_clean) <= 2:
+                        matched, corr_type = True, "typosquat"
 
         # ── exec_name (V10) ───────────────────────────────────────────────────
         # "John Smith CEO" - match if any 2-word substring of the name is in the IOC

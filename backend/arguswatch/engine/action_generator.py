@@ -21,10 +21,30 @@ from arguswatch.models import (
     FindingRemediation, SeverityLevel
 )
 
+import re as _re
+
 def _sev(val):
     """Safe severity extraction."""
     if val is None: return None
     return val.value if hasattr(val, "value") else str(val)
+
+def _strip_html(text: str) -> str:
+    """Remove HTML tags and CSS from text. Safety net for DB fields."""
+    if not isinstance(text, str):
+        return str(text) if text else ""
+    text = _re.sub(r'<style[^>]*>.*?</style>', '', text, flags=_re.DOTALL | _re.IGNORECASE)
+    text = _re.sub(r'<[^>]+>', ' ', text)
+    text = _re.sub(r'\{[^}]*\}', ' ', text)
+    text = _re.sub(r'[\w\-]+\s*:\s*[\w\-\(\)\#\%\.\,\s]+;', ' ', text)
+    text = _re.sub(r'\s+', ' ', text).strip()
+    return text
+
+def _safe_val(text, max_len: int = 200) -> str:
+    """Strip HTML/CSS and truncate. Safety net for all interpolated values."""
+    if text is None:
+        return ""
+    cleaned = _strip_html(str(text))
+    return cleaned[:max_len] if len(cleaned) > max_len else cleaned
 
 
 logger = logging.getLogger("arguswatch.engine.action_generator")
@@ -181,15 +201,15 @@ def _build_context(finding: Finding, customer, actor, campaign) -> dict:
             ransomware_countdown = due_date_str
 
     return {
-        "ioc_value": finding.ioc_value,
+        "ioc_value": _safe_val(finding.ioc_value),
         "ioc_type": finding.ioc_type,
         "customer": customer_str,
         "actor": actor_str,
-        "sources": sources_str,
+        "sources": _safe_val(sources_str, 300),
         "source_count": finding.source_count or 1,
         "confidence_pct": int((finding.confidence or 0.5) * 100),
         "correlation_type": finding.correlation_type or "matched",
-        "matched_asset": finding.matched_asset or "customer asset",
+        "matched_asset": _safe_val(finding.matched_asset or "customer asset"),
         "severity": _sev(finding.severity) or "MEDIUM",
         "campaign": campaign_str,
         "campaign_stage": campaign.kill_chain_stage if campaign else None,
@@ -216,7 +236,7 @@ def _title(playbook_key: str, ctx: dict) -> str:
     base = titles.get(playbook_key, f"Remediate {ctx['ioc_type']} finding for {ctx['customer']}")
     if ctx.get("campaign"):
         base += f" [Campaign: {ctx['campaign']}]"
-    return base
+    return base[:490]  # VARCHAR(500) safety net
 
 
 def _instantiate_playbook(playbook_key: str, ctx: dict) -> tuple[list, list, list]:

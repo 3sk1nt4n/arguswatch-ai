@@ -365,7 +365,7 @@ async def update_customer_exposure(
         select(CustomerExposure).where(
             CustomerExposure.customer_id == customer_id,
             CustomerExposure.actor_id == actor.id,
-        )
+        ).limit(1)
     )
     exposure = r2.scalar_one_or_none()
     if not exposure:

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # ═══════════════════════════════════════════════════════════
-#  ArgusWatch AI v16.4.1  -  One Command Launch
+#  ArgusWatch AI v16.4.6  -  One Command Launch
 #  Solvent CyberSecurity LLC
 #
 #  What happens automatically:
@@ -35,7 +35,7 @@ YELLOW='\033[1;33m'; BOLD='\033[1m'; NC='\033[0m'
 
 echo ""
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"
-echo -e "${BOLD}  ⚡ ArgusWatch AI v16.4.1  -  Fresh Start${NC}"
+echo -e "${BOLD}  ⚡ ArgusWatch AI v16.4.6  -  Fresh Start${NC}"
 echo -e "${BOLD}  🛡️  AI-Agentic Multi-Tenant Threat Intelligence${NC}"
 echo -e "${BOLD}  ⚠️  This destroys ALL data and rebuilds from scratch${NC}"
 echo -e "${CYAN}═══════════════════════════════════════════════════════════${NC}"

@@ -46,7 +46,7 @@ celery_app.conf.update(
         # ═══════════════════════════════════════════════════════════
         "intel-proxy-collect-all-4h": {
             "task": "arguswatch.tasks.collect_via_intel_proxy",
-            "schedule": 14400.0,  # 4 hours
+            "schedule": 3600.0,  # V16.4.5: every 1 hour (was 4h - too slow for demos)
             "kwargs": {"endpoint": "all"},
         },
 

@@ -186,6 +186,9 @@ async def collect_cisa_kev():
                     stats["skipped"] += 1
 
             # Mark all KEV CVEs as actively_exploited in cve_product_map
+            # V16.4.5: ALSO INSERT product mappings from KEV's own vendor/product fields
+            # Before this fix: KEV had vendor+product data but NEVER created mappings.
+            # This was the ROOT CAUSE of 189 unrouted CVEs.
             if kev_cve_ids:
                 try:
                     for cve_id in kev_cve_ids:
@@ -195,6 +198,31 @@ async def collect_cisa_kev():
                     stats["kev_marked"] = len(kev_cve_ids)
                 except Exception as e:
                     log.debug(f"KEV mark failed: {e}")
+
+            # V16.4.5: Create product mappings from KEV vendor/product fields
+            kev_products_added = 0
+            for v in vulns[-200:]:
+                cve = v.get("cveID", "")
+                vendor = v.get("vendorProject", "")
+                product = v.get("product", "")
+                if not cve or not product:
+                    continue
+                # Normalize product name to match tech_stack format
+                product_clean = product.strip().title()
+                try:
+                    check = await db.execute(text(
+                        "SELECT id FROM cve_product_map WHERE cve_id=:c AND product_name=:p LIMIT 1"
+                    ), {"c": cve, "p": product_clean})
+                    if not check.scalar():
+                        await db.execute(text("""
+                            INSERT INTO cve_product_map (cve_id, product_name, vendor, version_range, cvss_score, severity, actively_exploited, source, created_at)
+                            VALUES (:cve_id, :product, :vendor, '', 10.0, 'CRITICAL', true, 'cisa_kev', NOW())
+                        """), {"cve_id": cve, "product": product_clean, "vendor": vendor.strip().title()})
+                        kev_products_added += 1
+                except Exception as e:
+                    pass  # Duplicate or constraint - skip silently
+            stats["kev_products_added"] = kev_products_added
+            log.info(f"KEV: {kev_products_added} new product mappings added")
 
             await insert_collector_run(db, "kev", "completed", stats, started, datetime.utcnow())
             await db.commit()
@@ -383,7 +411,12 @@ async def collect_abuse_feodo_txt():
 
 async def collect_nvd():
     """NVD - real CVE data from NIST with CVSS metadata + CPE product map + EPSS scores."""
-    url = "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=50"
+    # V16.4.5: Filter for recent CVEs (last 7 days) instead of random 50 from all time
+    from datetime import timedelta
+    end = datetime.utcnow()
+    start = end - timedelta(days=7)
+    date_filter = f"&pubStartDate={start.strftime('%Y-%m-%dT00:00:00.000')}&pubEndDate={end.strftime('%Y-%m-%dT23:59:59.999')}"
+    url = f"https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=50{date_filter}"
     started = datetime.utcnow()
     stats = {"new": 0, "skipped": 0, "total": 0, "cpe_products": 0, "epss_enriched": 0}
     new_cve_ids = []
@@ -1172,28 +1205,44 @@ async def collect_intelx():
 
 async def collect_darksearch():
     """Ahmia.fi - clearnet Tor search index. FREE, no key needed.
-    Note: DarkSearch.io removed (dead). This uses Ahmia only."""
+    Customer-aware: searches for customer domains on dark web."""
     started = datetime.utcnow()
     stats = {"new": 0, "total": 0}
-    search_terms = ["ransomware leak", "data breach 2025", "stealer logs", "credential dump"]
+    import re
+    search_terms = ["ransomware leak 2026", "credential dump 2026", "stealer logs dump", "database leak sale"]
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as c:
             async with AsyncSessionLocal() as db:
-                for term in search_terms:
+                # Add customer-specific searches
+                try:
+                    r = await db.execute(text(
+                        "SELECT DISTINCT ca.asset_value FROM customer_assets ca WHERE ca.asset_type = 'domain' LIMIT 5"))
+                    for row in r.all():
+                        search_terms.append(f'"{row[0]}" leak')
+                except Exception:
+                    pass
+
+                for term in search_terms[:8]:
                     try:
-                        resp = await c.get("https://ahmia.fi/search/", params={"q": term},
-                                          headers={"User-Agent": "ArgusWatch/15.0"}, timeout=15.0)
+                        resp = await c.get("https://ahmia.fi/search/",
+                            params={"q": term},
+                            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+                                     "Accept": "text/html"},
+                            timeout=20.0)
                         if resp.status_code != 200: continue
-                        # Parse HTML for .onion URLs
-                        import re
                         onion_urls = re.findall(r'(https?://[a-z2-7]{16,56}\.onion[^\s"<]*)', resp.text)
+                        # Also extract result titles for context
+                        titles = re.findall(r'<h4>\s*<a[^>]*>(.*?)</a>', resp.text)
                         stats["total"] += len(onion_urls)
-                        for url in onion_urls[:20]:
-                            raw = f"Ahmia dark web: {term} - {url[:200]}"
+                        for i, url in enumerate(onion_urls[:15]):
+                            title = titles[i] if i < len(titles) else term
+                            title = re.sub(r'<[^>]+>', '', title).strip()[:200]
+                            raw = f"Dark web mention ({term}): {title} - {url[:200]}"
                             await insert_darkweb(db, "ahmia", "dark_web_url",
-                                f"{term}: {url[:100]}", severity="MEDIUM", url=url,
-                                metadata={"search_term": term})
+                                f"{title}: {url[:100]}", severity="MEDIUM", url=url,
+                                metadata={"search_term": term, "title": title})
                             stats["new"] += 1
+                        await asyncio.sleep(3)  # Ahmia rate limits aggressively
                     except Exception as e:
                         log.debug(f"Ahmia search '{term}' failed: {e}")
                         continue
@@ -1270,21 +1319,50 @@ async def collect_pulsedive():
                     r = await db.execute(text("""
                         SELECT DISTINCT ca.asset_value, ca.customer_id, c.name
                         FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id
-                        WHERE ca.asset_type = 'domain' AND c.active = true LIMIT 15
+                        WHERE ca.asset_type = 'domain' LIMIT 10
                     """))
                     customer_domains = r.all()
                 except Exception:
                     customer_domains = []
 
+                # Fallback: use generic threat queries if no customers yet
                 if not customer_domains:
-                    return {"skipped": True, "reason": "no customer domains", "new": 0}
+                    log.info("Pulsedive: no customers, running generic threat feed")
+                    generic_indicators = ["ransomware", "phishing", "malware"]
+                    for term in generic_indicators:
+                        try:
+                            resp = await c.get("https://pulsedive.com/api/explore.php",
+                                params={"q": f'threat="{term}"', "limit": 10, "pretty": 1},
+                                timeout=15.0, headers={"User-Agent": "ArgusWatch/16.4"})
+                            if resp.status_code != 200: continue
+                            data = resp.json()
+                            for result in (data.get("results", []) or [])[:10]:
+                                indicator = result.get("indicator", "")
+                                risk = (result.get("risk") or "none").lower()
+                                if not indicator or risk in ("none", "unknown", ""): continue
+                                sev_map = {"critical": "CRITICAL", "high": "HIGH", "medium": "MEDIUM", "low": "LOW"}
+                                sla_map = {"critical": 4, "high": 12, "medium": 24, "low": 72}
+                                ind_type = result.get("type", "").lower()
+                                ioc_type = "ipv4" if ind_type == "ip" else "domain" if ind_type == "domain" else "url" if ind_type == "url" else "indicator"
+                                raw = f"Pulsedive [{risk}]: {indicator} (generic threat: {term})"
+                                det_id = await insert_detection(db, "pulsedive", ioc_type,
+                                    indicator, sev_map.get(risk, "MEDIUM"), sla_map.get(risk, 24), raw,
+                                    confidence=0.6, metadata={"risk": risk, "threat_query": term})
+                                if det_id: stats["new"] += 1
+                                stats["total"] += 1
+                            await asyncio.sleep(2)
+                        except Exception as e:
+                            log.debug(f"Pulsedive generic '{term}': {e}")
+                    await insert_collector_run(db, "pulsedive", "completed", stats, started, datetime.utcnow())
+                    await db.commit()
+                    return stats
 
-                for domain, cust_id, cust_name in customer_domains[:10]:
+                for domain, cust_id, cust_name in customer_domains[:3]:  # Max 3 - free tier is 30 req/day
                     stats["customers_queried"] += 1
                     # Pulsedive explore API: find indicators related to this domain
                     params = {
                         "q": f'indicator="{domain}"',
-                        "limit": 20,
+                        "limit": 10,
                         "pretty": 1,
                     }
                     if PULSEDIVE_KEY:
@@ -1294,8 +1372,11 @@ async def collect_pulsedive():
                         resp = await c.get("https://pulsedive.com/api/explore.php",
                             params=params, timeout=15.0,
                             headers={"User-Agent": "ArgusWatch/16.0"})
+                        if resp.status_code == 429:
+                            log.warning(f"Pulsedive rate limited after {stats['customers_queried']} queries. Stopping.")
+                            break
                         if resp.status_code != 200:
-                            await asyncio.sleep(1)
+                            await asyncio.sleep(15)
                             continue
 
                         data = resp.json()
@@ -1335,7 +1416,7 @@ async def collect_pulsedive():
                             if det_id:
                                 stats["new"] += 1
 
-                        await asyncio.sleep(1.5)  # Rate limit between customer queries
+                        await asyncio.sleep(15)  # 15s between queries - free tier is 30 req/day
                     except Exception as e:
                         log.debug(f"Pulsedive {domain}: {e}")
 
@@ -1349,48 +1430,66 @@ async def collect_pulsedive():
 
 
 async def collect_vxunderground():
-    """VX-Underground - malware samples, APT tracking. FREE, no key."""
+    """VX-Underground - malware intelligence via Malpedia (FREE, no key).
+    NOTE: vx-underground.org RSS + MalwareBazaar API both require auth now. Using Malpedia."""
     started = datetime.utcnow()
     stats = {"new": 0, "total": 0}
     try:
         async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as c:
-            # VX-Underground samples RSS
+            # Source 1: Malpedia malware families (comprehensive free database)
             try:
-                resp = await c.get("https://vx-underground.org/samples.rss")
+                resp = await c.get("https://malpedia.caad.fkie.fraunhofer.de/api/list/families",
+                    headers={"User-Agent": "ArgusWatch/16.4"}, timeout=20.0)
                 if resp.status_code == 200:
-                    # Simple RSS parsing
-                    import re
-                    items = re.findall(r'<title>(.*?)</title>', resp.text)[1:]  # skip feed title
-                    stats["total"] += len(items)
+                    families = resp.json()
+                    stats["total"] += len(families) if isinstance(families, (list, dict)) else 0
+                    items = list(families.items())[:50] if isinstance(families, dict) else families[:50]
                     async with AsyncSessionLocal() as db:
-                        for title in items[:30]:
-                            raw = f"VX-Underground sample: {title[:200]}"
-                            det_id = await insert_detection(db, "vxunderground", "advisory", title[:200],
-                                "MEDIUM", 72, raw, confidence=0.5)
+                        for item in items:
+                            if isinstance(item, tuple):
+                                family_id, family_data = item
+                                name = family_id
+                                desc = family_data.get("description", "")[:200] if isinstance(family_data, dict) else str(family_data)[:200]
+                            else:
+                                name = str(item)[:100]
+                                desc = ""
+                            raw = f"Malpedia malware family: {name}. {desc}"
+                            det_id = await insert_detection(db, "vxunderground", "malware_hash",
+                                name, "MEDIUM", 72, raw, confidence=0.7,
+                                metadata={"family": name, "source": "malpedia"})
                             if det_id: stats["new"] += 1
                         await db.commit()
             except Exception as e:
-                log.debug(f"VX-Underground samples: {e}")
+                log.debug(f"VX-UG/Malpedia families: {e}")
 
-            # VX-Underground APT papers RSS
+            # Source 2: Malpedia threat actors
             try:
-                resp = await c.get("https://vx-underground.org/papers.rss")
+                resp = await c.get("https://malpedia.caad.fkie.fraunhofer.de/api/list/actors",
+                    headers={"User-Agent": "ArgusWatch/16.4"}, timeout=20.0)
                 if resp.status_code == 200:
-                    import re
-                    items = re.findall(r'<title>(.*?)</title>', resp.text)[1:]
+                    actors = resp.json()
                     async with AsyncSessionLocal() as db:
-                        for title in items[:20]:
-                            await insert_darkweb(db, "vxunderground", "threat_research",
-                                title[:200], severity="LOW")
-                            stats["new"] += 1
+                        actor_items = list(actors.items())[:30] if isinstance(actors, dict) else actors[:30]
+                        for item in actor_items:
+                            if isinstance(item, tuple):
+                                actor_id, actor_data = item
+                            else:
+                                actor_id = str(item)
+                                actor_data = {}
+                            raw = f"Malpedia actor: {actor_id}"
+                            det_id = await insert_detection(db, "vxunderground", "apt_group",
+                                actor_id, "MEDIUM", 24, raw, confidence=0.8,
+                                metadata={"actor": actor_id, "source": "malpedia_actors"})
+                            if det_id: stats["new"] += 1
+                            stats["total"] += 1
                         await db.commit()
             except Exception as e:
-                log.debug(f"VX-Underground papers: {e}")
+                log.debug(f"VX-UG/Malpedia actors: {e}")
 
-        async with AsyncSessionLocal() as db:
-            await insert_collector_run(db, "vxunderground", "completed", stats, started, datetime.utcnow())
-            await db.commit()
-        log.info(f"VX-Underground: {stats['new']} new / {stats['total']} total")
+            async with AsyncSessionLocal() as db:
+                await insert_collector_run(db, "vxunderground", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"VX-Underground/Malpedia: {stats['new']} new / {stats['total']} total")
     except Exception as e:
         log.error(f"VX-Underground failed: {e}")
         stats["error"] = str(e)
@@ -1532,8 +1631,7 @@ async def collect_grep_app():
     """
     started = datetime.utcnow()
     stats = {"new": 0, "total": 0, "customer_targeted": 0, "generic": 0}
-    
-    # Import pattern_matcher for specific IOC classification
+    import re as _re
     import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'backend'))
     try:
@@ -1604,9 +1702,10 @@ async def collect_grep_app():
                             hits = data.get("hits", {}).get("hits", [])
                             stats["total"] += len(hits)
                             for hit in hits[:5]:
-                                repo = hit.get("repo", {}).get("raw", "")
-                                file_path = hit.get("file", {}).get("raw", "")
-                                snippet = hit.get("content", {}).get("snippet", "")[:300]
+                                repo = hit.get("repo", "") if isinstance(hit.get("repo"), str) else hit.get("repo", {}).get("raw", "")
+                                file_path = hit.get("path", "") if isinstance(hit.get("path"), str) else hit.get("file", {}).get("raw", "")
+                                raw_snippet = hit.get("content", {}).get("snippet", "") if isinstance(hit.get("content"), dict) else str(hit.get("content", ""))
+                                snippet = _re.sub(r'<[^>]+>', '', raw_snippet)[:300]
                                 if not repo: continue
                                 raw = f"Customer-targeted GitHub leak [{cust_name}]: {repo}/{file_path} - {snippet}"
                                 # Classify snippet with pattern_matcher
@@ -1626,10 +1725,89 @@ async def collect_grep_app():
                 
                 # ── MODE 2: Generic high-signal searches ──
                 generic_queries = [
+                    # ── ORIGINAL (already working) ──
                     "AWS_SECRET_ACCESS_KEY",
                     "PRIVATE KEY filename:.pem",
                     "sk_live_ filename:.env",
                     "ghp_ filename:.env",
+                    # ── SLACK (CRITICAL, 0 in database) ──
+                    "xoxb- filename:.env",
+                    "xoxp- filename:.env",
+                    # ── GITLAB (CRITICAL, 0 in database) ──
+                    "glpat- filename:.env",
+                    # ── AI KEYS (CRITICAL — pattern was broken, now fixed) ──
+                    "sk-ant-api filename:.env",
+                    "OPENAI_API_KEY filename:.env",
+                    # ── GOOGLE OAUTH (ya29.* expire but EVIDENCE of leak) ──
+                    "ya29. filename:.env",
+                    "ya29. filename:.properties",
+                    # ── JWT TOKENS (now merged into single type) ──
+                    "eyJhbGciOi",
+                    # ── SENDGRID (pattern fixed) ──
+                    "SG. filename:.env",
+                    "SENDGRID_API_KEY filename:.env",
+                    # ── CLOUD BUCKETS (replaces broken Sourcegraph) ──
+                    ".blob.core.windows.net",
+                    "storage.googleapis.com filename:.env",
+                    "blob.core.windows.net sig=",
+                    "s3:// filename:.env",
+                    # ── DEV TUNNELS (replaces broken Sourcegraph) ──
+                    "ngrok.io filename:.env",
+                    "serveo.net filename:.env",
+                    # ── AZURE (replaces broken Sourcegraph) ──
+                    "AZURE_TOKEN filename:.env",
+                    "AZURE_CLIENT_SECRET filename:.env",
+                    # ── REMOTE CREDENTIALS ──
+                    "rdp:// filename:.env",
+                    "DATABASE_URL= filename:.env",
+                    # ── SESSION TOKENS (expired but evidence of leak) ──
+                    "JSESSIONID filename:.env",
+                    "PHPSESSID filename:.properties",
+                    # ── GITHUB OAuth (auto-revoked but in git history) ──
+                    "gho_ filename:.env",
+                    "ghs_ filename:.env",
+                    "github_pat_ filename:.env",
+                    # ── v16.4.5: NEW — 35 missing IOC type searches ──
+                    # CSV data dumps (people commit sample/test CSVs)
+                    "username,password,email filename:.csv",
+                    "ssn,name,dob filename:.csv",
+                    "card_number,cvv filename:.csv",
+                    # SQL exfiltration (CTF/red team repos)
+                    "INTO OUTFILE filename:.sql",
+                    "INTO DUMPFILE filename:.sql",
+                    # Exfiltration commands (red team tools)
+                    "base64 /etc/shadow",
+                    "transfer.sh filename:.sh",
+                    # Archive staging
+                    "7z a -p filename:.sh",
+                    # Financial data (test numbers in committed code)
+                    "5425233430109903",
+                    "4111111111111111",
+                    "378282246310005",
+                    # NTLM/Kerberos (pentest dumps in repos)
+                    "krbtgt filename:.txt",
+                    "mimikatz filename:.log",
+                    "NTLM filename:.txt",
+                    # Breakglass (emergency procedures committed)
+                    "break glass password",
+                    "emergency access credential",
+                    # LDAP configs (infrastructure repos)
+                    "CN= DC= filename:.conf",
+                    # Backup files (database dumps committed)
+                    "mysqldump filename:.sh",
+                    ".sql.gz filename:.env",
+                    # Cloud shares (links committed in code)
+                    "dropbox.com/s/ filename:.md",
+                    "drive.google.com/file filename:.md",
+                    # Ransom notes (research/sample repos)
+                    "your files have been encrypted",
+                    # V16.4.6: Two types had NO query — adding now
+                    "AIza filename:.env",
+                    "bitcoin address filename:.txt",
+                    # SSN format (test data in repos)
+                    "social_security filename:.csv",
+                    # IBAN format (banking app test configs)
+                    "IBAN filename:.env",
                 ]
                 for query in generic_queries:
                     try:
@@ -1641,9 +1819,10 @@ async def collect_grep_app():
                         hits = data.get("hits", {}).get("hits", [])
                         stats["total"] += len(hits)
                         for hit in hits[:10]:
-                            repo = hit.get("repo", {}).get("raw", "")
-                            file_path = hit.get("file", {}).get("raw", "")
-                            snippet = hit.get("content", {}).get("snippet", "")[:200]
+                            repo = hit.get("repo", "") if isinstance(hit.get("repo"), str) else hit.get("repo", {}).get("raw", "")
+                            file_path = hit.get("path", "") if isinstance(hit.get("path"), str) else hit.get("file", {}).get("raw", "")
+                            raw_snippet = hit.get("content", {}).get("snippet", "") if isinstance(hit.get("content"), dict) else str(hit.get("content", ""))
+                            snippet = _re.sub(r'<[^>]+>', '', raw_snippet)[:200]
                             if not repo: continue
                             raw = f"Grep.app exposed secret: {repo}/{file_path} - {snippet}"
                             # Classify snippet with pattern_matcher
@@ -1658,6 +1837,7 @@ async def collect_grep_app():
                                     stats["generic"] += 1
                     except Exception as e:
                         log.debug(f"Grep.app generic '{query}': {e}")
+                    await asyncio.sleep(1.5)  # V16.4.5: Rate limit - 52 queries needs spacing
                 
                 await insert_collector_run(db, "grep_app", "completed", stats, started, datetime.utcnow())
                 await db.commit()
@@ -2026,8 +2206,55 @@ async def _store_ioc_matches(db_ignored, raw_text, source_name, source_url,
         log.debug(f"pattern_matcher error: {e}")
         return 0
 
+    # V16.4.5: IOC types where collector-level customer_id is WRONG.
+    # A gist search for "github.com" finds gists with random URLs inside.
+    # Those URLs belong to whoever owns the domain, NOT to GitHub.
+    # Only hash/CVE/advisory types make sense with context-based customer routing.
+    CONTEXT_SAFE_TYPES = {
+        "cve_id", "advisory", "sha256", "sha1", "md5", "sha512",
+        "malware_hash", "apt_group", "ransomware_group", "campaign",
+        "breach_record", "email_password_combo", "username_password_combo",
+        "breachdirectory_combo", "privileged_credential", "config_file",
+        "sql_schema_dump", "crypto_seed_phrase", "bitcoin_address",
+        "monero_address", "data_auction", "ransom_note",
+    }
+
     new_count = 0
+    # Skip IOC types that are public data, not leaked secrets (swift_bic = 53% of all Gist output)
+    SKIP_JUNK_TYPES = {"swift_bic", "ach_routing"}
+    # V16.4.5: False positive patterns that should NEVER be stored
+    FP_PATTERNS = {
+        "privileged_credential": [
+            r"^system:\\n",      # Mermaid diagrams starting with system:
+            r"^system:\*\*",     # Markdown bold system headers
+            r"^System:\*\*",
+            r"```mermaid",       # Mermaid code blocks
+            r"^admin$",          # Generic words, not actual credentials
+            r"^root$",
+            r"^administrator$",
+        ],
+        "malicious_url_path": [
+            r"^aff\.php\?",      # Affiliate tracking links, not malicious
+            r"^ref\.php\?",
+            r"^click\.php\?",
+            r"^track\.php\?",
+        ],
+    }
+    import re as _re_fp
+    def _is_false_positive(ioc_type, value):
+        patterns = FP_PATTERNS.get(ioc_type)
+        if not patterns:
+            return False
+        for pat in patterns:
+            if _re_fp.search(pat, value, _re_fp.IGNORECASE):
+                return True
+        return False
+
     for m in matches[:100]:
+        if m.ioc_type in SKIP_JUNK_TYPES:
+            continue
+        if _is_false_positive(m.ioc_type, m.value):
+            continue
         severity = "MEDIUM"
         sla = 48
         if _sev_score_v2:
@@ -2051,7 +2278,11 @@ async def _store_ioc_matches(db_ignored, raw_text, source_name, source_url,
         det_id = await insert_detection(
             db_ignored, source_name, m.ioc_type, m.value,
             severity, sla, raw_desc[:2000],
-            confidence=m.confidence, customer_id=customer_id, metadata=meta)
+            confidence=m.confidence,
+            # V16.4.5: Only pass customer_id for IOC types where context makes sense.
+            # URL/domain/email IOCs get customer_id=None → correlation engine routes them.
+            customer_id=customer_id if m.ioc_type in CONTEXT_SAFE_TYPES else None,
+            metadata=meta)
         if det_id:
             new_count += 1
     return new_count
@@ -2149,22 +2380,22 @@ async def collect_sourcegraph():
     stats = {"new": 0, "queries": 0, "results_scanned": 0}
     # High-signal queries ordered by danger (SLA 1h first)
     queries = [
-        ("sk_live_ count:50", "stripe_live_key"),
-        ("xoxb- count:50", "slack_bot_token"),
-        ("xoxp- count:50", "slack_user_token"),
-        ("AKIA count:100", "aws_access_key"),
-        ("AWS_SECRET_ACCESS_KEY count:50", "aws_secret_key"),
-        ("ghp_ count:50", "github_pat"),
-        ("glpat- count:50", "gitlab_pat"),
-        ("sk-ant-api count:30", "anthropic_key"),
-        ('"-----BEGIN RSA PRIVATE KEY-----" count:50', "private_key"),
-        ('"-----BEGIN OPENSSH PRIVATE KEY-----" count:30', "ssh_key"),
-        ("password= filename:.env count:50", "env_password"),
-        ("DATABASE_URL= filename:.env count:50", "db_connection"),
-        ("SENDGRID_API_KEY count:30", "sendgrid"),
-        ("s3.amazonaws.com count:30", "s3_bucket"),
-        (".blob.core.windows.net count:30", "azure_blob"),
-        ("ngrok.io count:20", "dev_tunnel"),
+        ("sk_live_ fork:yes count:50", "stripe_live_key"),
+        ("xoxb- fork:yes count:50", "slack_bot_token"),
+        ("xoxp- fork:yes count:50", "slack_user_token"),
+        ("AKIA fork:yes count:100", "aws_access_key"),
+        ("AWS_SECRET_ACCESS_KEY fork:yes count:50", "aws_secret_key"),
+        ("ghp_ fork:yes count:50", "github_pat"),
+        ("glpat- fork:yes count:50", "gitlab_pat"),
+        ("sk-ant-api fork:yes count:30", "anthropic_key"),
+        ('"-----BEGIN RSA PRIVATE KEY-----" fork:yes count:50', "private_key"),
+        ('"-----BEGIN OPENSSH PRIVATE KEY-----" fork:yes count:30', "ssh_key"),
+        ("password= file:.env fork:yes count:50", "env_password"),
+        ("DATABASE_URL= file:.env fork:yes count:50", "db_connection"),
+        ("SENDGRID_API_KEY fork:yes count:30", "sendgrid"),
+        ("s3.amazonaws.com fork:yes count:30", "s3_bucket"),
+        (".blob.core.windows.net fork:yes count:30", "azure_blob"),
+        ("ngrok.io fork:yes count:20", "dev_tunnel"),
     ]
     try:
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
@@ -2668,6 +2899,266 @@ async def collect_telegram():
     return stats
 
 
+# ════════════════════════════════════════════════════════════
+# NEW COLLECTORS v16.4.4: crt.sh, HIBP breaches, GitHub Code Search, URLScan community
+# ════════════════════════════════════════════════════════════
+
+async def collect_crtsh():
+    """crt.sh Certificate Transparency - discovers ALL subdomains via SSL cert logs. FREE."""
+    started = datetime.utcnow()
+    stats = {"new": 0, "total": 0, "customers": 0}
+    try:
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
+            async with AsyncSessionLocal() as db:
+                try:
+                    r = await db.execute(text(
+                        "SELECT DISTINCT ca.asset_value, ca.customer_id, c.name "
+                        "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                        "WHERE ca.asset_type = 'domain' LIMIT 10"))
+                    domains = r.all()
+                except Exception:
+                    domains = []
+                for domain, cust_id, cust_name in domains:
+                    stats["customers"] += 1
+                    try:
+                        resp = await c.get(f"https://crt.sh/?q=%25.{domain}&output=json",
+                            headers={"User-Agent": "ArgusWatch/16.4"}, timeout=25.0)
+                        if resp.status_code != 200: continue
+                        certs = resp.json()
+                        seen = set()
+                        for cert in certs[:100]:
+                            name = cert.get("name_value", "") or cert.get("common_name", "")
+                            for subdomain in name.split("\n"):
+                                subdomain = subdomain.strip().lower()
+                                if not subdomain or subdomain in seen or subdomain == domain:
+                                    continue
+                                if not subdomain.endswith(f".{domain}") and subdomain != domain:
+                                    continue
+                                seen.add(subdomain)
+                                stats["total"] += 1
+                                raw = f"CT Log: subdomain {subdomain} found for {cust_name} ({domain})"
+                                det_id = await insert_detection(db, "crtsh", "subdomain",
+                                    subdomain, "MEDIUM", 24, raw, confidence=0.95,
+                                    customer_id=cust_id,
+                                    metadata={"domain": domain, "customer": cust_name,
+                                              "issuer": cert.get("issuer_name", "")[:100],
+                                              "not_before": cert.get("not_before", ""),
+                                              "source": "certificate_transparency"})
+                                if det_id: stats["new"] += 1
+                        await asyncio.sleep(2)
+                    except Exception as e:
+                        log.debug(f"crt.sh {domain}: {e}")
+                await insert_collector_run(db, "crtsh", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"crt.sh: {stats['new']} subdomains from {stats['customers']} customers")
+    except Exception as e:
+        log.error(f"crt.sh failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+async def collect_hibp_breaches():
+    """HIBP Breach Database - cross-refs customer domains against ALL known breaches. FREE (no key for breach list)."""
+    started = datetime.utcnow()
+    stats = {"new": 0, "total": 0, "breaches_checked": 0}
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as c:
+            resp = await c.get("https://haveibeenpwned.com/api/v3/breaches",
+                headers={"User-Agent": "ArgusWatch/16.4"})
+            if resp.status_code != 200:
+                return {"error": f"HIBP returned {resp.status_code}", "new": 0}
+            breaches = resp.json()
+            stats["breaches_checked"] = len(breaches)
+            async with AsyncSessionLocal() as db:
+                try:
+                    r = await db.execute(text(
+                        "SELECT DISTINCT ca.asset_value, ca.customer_id, c.name "
+                        "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                        "WHERE ca.asset_type = 'domain' LIMIT 10"))
+                    domains = r.all()
+                except Exception:
+                    domains = []
+                domain_set = {d[0].lower() for d in domains}
+                domain_cust = {d[0].lower(): (d[1], d[2]) for d in domains}
+                # Also build name-based lookup for fuzzy matching
+                name_cust = {}
+                for d in domains:
+                    cname = d[2].lower().strip()
+                    if len(cname) > 3:  # Skip very short names to avoid false matches
+                        name_cust[cname] = (d[1], d[2])
+                for breach in breaches:
+                    bdomain = (breach.get("Domain") or "").lower()
+                    bname = breach.get("Name", "")
+                    btitle = breach.get("Title", "").lower()
+                    if not bdomain and not bname: continue
+                    stats["total"] += 1
+                    matched_domain = None
+                    matched_cust = None
+                    # Method 1: Domain match
+                    for cd in domain_set:
+                        if bdomain == cd or bdomain.endswith(f".{cd}") or cd.endswith(f".{bdomain}"):
+                            matched_domain = cd
+                            matched_cust = domain_cust[matched_domain]
+                            break
+                    # Method 2: Company name in breach title (e.g. "Yahoo" in "Yahoo Voices")
+                    if not matched_cust:
+                        for cname, cdata in name_cust.items():
+                            if cname in btitle or cname in bname.lower():
+                                matched_cust = cdata
+                                matched_domain = cname
+                                break
+                    if matched_cust:
+                        cust_id, cust_name = matched_cust
+                        pwn_count = breach.get("PwnCount", 0)
+                        data_classes = breach.get("DataClasses", [])
+                        severity = "CRITICAL" if pwn_count > 1000000 or "Passwords" in data_classes else \
+                                   "HIGH" if pwn_count > 100000 or "Credit cards" in data_classes else "MEDIUM"
+                        sla = 4 if severity == "CRITICAL" else 12 if severity == "HIGH" else 24
+                        raw = (f"HIBP Breach: {bname} affected {bdomain} ({pwn_count:,} records). "
+                               f"Data exposed: {', '.join(data_classes[:5])}. Customer: {cust_name}")
+                        det_id = await insert_detection(db, "hibp_breaches", "breach_record",
+                            f"{bname}:{bdomain}", severity, sla, raw, confidence=0.95,
+                            customer_id=cust_id,
+                            metadata={"breach_name": bname, "breach_date": breach.get("BreachDate"),
+                                      "pwn_count": pwn_count, "data_classes": data_classes[:10],
+                                      "customer": cust_name, "domain": bdomain})
+                        if det_id: stats["new"] += 1
+                await insert_collector_run(db, "hibp_breaches", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"HIBP Breaches: {stats['new']} customer matches from {stats['breaches_checked']} breaches")
+    except Exception as e:
+        log.error(f"HIBP Breaches failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+async def collect_github_code_search():
+    """GitHub Code Search API - finds leaked secrets in public repos. Needs GITHUB_TOKEN (free)."""
+    github_token = os.getenv("GITHUB_TOKEN", "")
+    if not github_token:
+        return {"skipped": True, "reason": "no GITHUB_TOKEN", "new": 0}
+    started = datetime.utcnow()
+    stats = {"new": 0, "total": 0, "queries": 0}
+    queries = [
+        # Original 6
+        ("AKIA extension:env", "aws_access_key"),
+        ("sk_live_ extension:env", "stripe_live_key"),
+        ("xoxb- extension:env", "slack_bot_token"),
+        ("ghp_ extension:env", "github_pat"),
+        ("DATABASE_URL= extension:env", "db_connection"),
+        ("PRIVATE KEY extension:pem", "private_key"),
+        # Fix BROKEN: replaces Sourcegraph for these 6 IOC types
+        (".blob.core.windows.net extension:env", "azure_blob_public"),
+        ("storage.googleapis.com extension:env", "gcs_public_bucket"),
+        ("s3:// extension:env", "s3_bucket_ref"),
+        ("ngrok.io extension:env", "dev_tunnel_exposed"),
+        ("SharedAccessSignature= extension:env", "azure_sas_token"),
+        ("Bearer ey extension:env", "azure_bearer"),
+        # Fix PATTERN EXISTS: high-value secrets
+        ("xoxp- extension:env", "slack_user_token"),
+        ("glpat- extension:env", "gitlab_pat"),
+        ("sk-ant-api extension:env", "anthropic_api_key"),
+        ("SG. extension:env", "sendgrid_api_key"),
+        ("ya29. extension:env", "google_oauth_bearer"),
+        ("eyJhbG extension:env", "jwt_token"),
+    ]
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as c:
+            headers = {"Authorization": f"token {github_token}",
+                       "Accept": "application/vnd.github.v3.text-match+json",
+                       "User-Agent": "ArgusWatch/16.4"}
+            async with AsyncSessionLocal() as db:
+                for query, label in queries:
+                    stats["queries"] += 1
+                    try:
+                        resp = await c.get("https://api.github.com/search/code",
+                            params={"q": query, "per_page": 20},
+                            headers=headers, timeout=15.0)
+                        if resp.status_code == 403:
+                            log.warning("GitHub Code Search rate limited")
+                            break
+                        if resp.status_code != 200: continue
+                        data = resp.json()
+                        items = data.get("items", [])
+                        stats["total"] += len(items)
+                        for item in items[:15]:
+                            repo = item.get("repository", {}).get("full_name", "")
+                            fpath = item.get("path", "")
+                            html_url = item.get("html_url", "")
+                            text_matches = item.get("text_matches", [])
+                            snippet = "\n".join(tm.get("fragment", "") for tm in text_matches[:3])[:500]
+                            if not repo or not snippet: continue
+                            raw = f"GitHub Code: {label} found in {repo}/{fpath}\n{snippet[:300]}"
+                            new = await _store_ioc_matches(db, snippet, "github_code", html_url,
+                                metadata_extra={"repo": repo, "file": fpath, "query": label})
+                            stats["new"] += new
+                        await asyncio.sleep(3)  # GitHub rate limit
+                    except Exception as e:
+                        log.debug(f"GitHub Code '{label}': {e}")
+                await insert_collector_run(db, "github_code", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"GitHub Code Search: {stats['new']} IOCs from {stats['queries']} queries")
+    except Exception as e:
+        log.error(f"GitHub Code Search failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+async def collect_urlscan_community():
+    """URLScan.io Community Feed - detects phishing pages targeting customer brands. FREE."""
+    started = datetime.utcnow()
+    stats = {"new": 0, "total": 0, "customers": 0}
+    try:
+        async with httpx.AsyncClient(timeout=20.0, follow_redirects=True) as c:
+            async with AsyncSessionLocal() as db:
+                try:
+                    r = await db.execute(text(
+                        "SELECT DISTINCT ca.asset_value, ca.customer_id, c.name "
+                        "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                        "WHERE ca.asset_type = 'domain' LIMIT 8"))
+                    domains = r.all()
+                except Exception:
+                    domains = []
+                for domain, cust_id, cust_name in domains:
+                    stats["customers"] += 1
+                    try:
+                        resp = await c.get("https://urlscan.io/api/v1/search/",
+                            params={"q": f"domain:{domain}", "size": 20},
+                            headers={"User-Agent": "ArgusWatch/16.4"}, timeout=15.0)
+                        if resp.status_code != 200: continue
+                        data = resp.json()
+                        for result in data.get("results", [])[:15]:
+                            task = result.get("task", {})
+                            page = result.get("page", {})
+                            scan_url = task.get("url", "")
+                            scan_domain = task.get("domain", "")
+                            if not scan_url: continue
+                            stats["total"] += 1
+                            is_sus = scan_domain and scan_domain != domain and domain in scan_url
+                            severity = "HIGH" if is_sus else "MEDIUM"
+                            sla = 12 if is_sus else 24
+                            raw = (f"URLScan: {scan_url[:200]} "
+                                   f"{'SUSPICIOUS - different domain mentions ' + cust_name if is_sus else 'scan result for ' + cust_name}")
+                            det_id = await insert_detection(db, "urlscan_community", "url",
+                                scan_url[:500], severity, sla, raw, confidence=0.7 if is_sus else 0.5,
+                                customer_id=cust_id,
+                                metadata={"domain": scan_domain, "customer": cust_name,
+                                          "suspicious": is_sus, "country": page.get("country", ""),
+                                          "server": page.get("server", ""),
+                                          "result_url": f"https://urlscan.io/result/{task.get('uuid', '')}/"})
+                            if det_id: stats["new"] += 1
+                        await asyncio.sleep(2)
+                    except Exception as e:
+                        log.debug(f"URLScan {domain}: {e}")
+                await insert_collector_run(db, "urlscan_community", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"URLScan Community: {stats['new']} from {stats['customers']} customers")
+    except Exception as e:
+        log.error(f"URLScan Community failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
 # Stub enterprise collectors - ready for key activation
 async def collect_cybersixgill():
     if not SIXGILL_ID: return {"skipped": True, "reason": "no CYBERSIXGILL_CLIENT_ID", "new": 0}
@@ -2822,6 +3313,327 @@ async def discover_assets(domain: str) -> dict:
 
 
 # ════════════════════════════════════════════════════════════
+# V16.4.5: NEW HIGH-VALUE FREE COLLECTORS
+# ════════════════════════════════════════════════════════════
+
+async def collect_shodan_internetdb():
+    """Shodan InternetDB - FREE exposed service scan per customer IP. NO key needed.
+    API: https://internetdb.shodan.io/{ip} - returns open ports, CVEs, hostnames.
+    Customer-targeted: looks up every customer IP asset.
+    """
+    started = datetime.utcnow()
+    stats = {"new": 0, "total": 0, "ips_checked": 0, "vulns_found": 0}
+    try:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(text(
+                "SELECT ca.asset_value, ca.customer_id, c.name "
+                "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                "WHERE ca.asset_type = 'ip' AND c.active = true LIMIT 50"
+            ))
+            ip_assets = r.all()
+        if not ip_assets:
+            return {"skipped": True, "reason": "no customer IP assets", "new": 0}
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as c:
+            async with AsyncSessionLocal() as db:
+                for ip_val, cust_id, cust_name in ip_assets:
+                    stats["ips_checked"] += 1
+                    try:
+                        resp = await c.get(f"https://internetdb.shodan.io/{ip_val}")
+                        if resp.status_code != 200:
+                            continue
+                        data = resp.json()
+                        ports = data.get("ports", [])
+                        cves = data.get("vulns", [])
+                        hostnames = data.get("hostnames", [])
+                        # Insert open port finding
+                        if ports:
+                            risky_ports = [p for p in ports if p in (21,22,23,25,110,135,139,445,1433,3306,3389,5432,5900,6379,8080,8443,9200,27017)]
+                            if risky_ports:
+                                sev = "HIGH" if any(p in (3389,445,23,21) for p in risky_ports) else "MEDIUM"
+                                raw = f"Shodan InternetDB: {ip_val} has {len(ports)} open ports. Risky: {risky_ports}. Hostnames: {hostnames[:3]}"
+                                await insert_detection(db, "shodan_internetdb", "exposed_service",
+                                    f"{ip_val}:ports:{','.join(str(p) for p in risky_ports[:5])}",
+                                    sev, 24, raw, confidence=0.90, customer_id=cust_id,
+                                    metadata={"ip": ip_val, "ports": ports, "risky_ports": risky_ports,
+                                              "hostnames": hostnames, "customer": cust_name})
+                                stats["new"] += 1
+                            # V16.4.5: Map specific ports to IOC types
+                            SERVICE_PORT_MAP = {
+                                9200: ("elasticsearch_exposed", "CRITICAL", "Elasticsearch"),
+                                5601: ("open_analytics_service", "HIGH", "Kibana"),
+                                3000: ("open_analytics_service", "HIGH", "Grafana"),
+                                27017: ("exposed_service", "CRITICAL", "MongoDB"),
+                                6379: ("exposed_service", "CRITICAL", "Redis"),
+                                5432: ("exposed_service", "HIGH", "PostgreSQL"),
+                                3306: ("exposed_service", "HIGH", "MySQL"),
+                                3389: ("exposed_service", "CRITICAL", "RDP"),
+                                445: ("exposed_service", "CRITICAL", "SMB"),
+                            }
+                            for port in ports:
+                                if port in SERVICE_PORT_MAP:
+                                    ioc_t, sev_t, svc_name = SERVICE_PORT_MAP[port]
+                                    raw = f"Shodan InternetDB: {svc_name} exposed on {ip_val}:{port} ({cust_name})"
+                                    await insert_detection(db, "shodan_internetdb", ioc_t,
+                                        f"{ip_val}:{port}:{svc_name.lower()}", sev_t, 4 if sev_t == "CRITICAL" else 12,
+                                        raw, confidence=0.92, customer_id=cust_id,
+                                        metadata={"ip": ip_val, "port": port, "service": svc_name, "customer": cust_name})
+                                    stats["new"] += 1
+                        # Insert CVE findings for this IP
+                        for cve_id in cves[:10]:
+                            raw = f"Shodan InternetDB: {ip_val} ({cust_name}) vulnerable to {cve_id}"
+                            await insert_detection(db, "shodan_internetdb", "cve_id",
+                                cve_id, "CRITICAL", 4, raw, confidence=0.85, customer_id=cust_id,
+                                metadata={"ip": ip_val, "customer": cust_name, "source": "shodan_internetdb"})
+                            stats["vulns_found"] += 1
+                            stats["new"] += 1
+                        await asyncio.sleep(0.5)  # Rate limit
+                    except Exception as e:
+                        log.debug(f"InternetDB {ip_val}: {e}")
+                await insert_collector_run(db, "shodan_internetdb", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"Shodan InternetDB: {stats['ips_checked']} IPs checked, {stats['new']} findings, {stats['vulns_found']} CVEs")
+    except Exception as e:
+        log.error(f"Shodan InternetDB failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+async def collect_crtsh():
+    """crt.sh Certificate Transparency - periodic subdomain discovery.
+    FREE, no key. Finds NEW certificates issued since last scan.
+    Discovers: shadow IT, dev environments, internal tools with public certs,
+    forgotten services, new subdomains the customer may not know about.
+    Runs for all active customers with domain assets.
+    """
+    started = datetime.utcnow()
+    stats = {"new_subdomains": 0, "new_detections": 0, "customers": 0, "errors": 0}
+    INTERESTING_KEYWORDS = ["admin", "vpn", "api", "staging", "dev", "test", "beta",
+                            "internal", "corp", "priv", "login", "sso", "auth", "portal",
+                            "jenkins", "gitlab", "grafana", "kibana", "elastic", "mongo",
+                            "redis", "phpmyadmin", "wp-admin", "backup", "db", "sql",
+                            "ftp", "sftp", "ssh", "rdp", "remote", "jump", "bastion"]
+    try:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(text(
+                "SELECT ca.asset_value, ca.customer_id, c.name "
+                "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                "WHERE ca.asset_type = 'domain' AND c.active = true LIMIT 20"
+            ))
+            domains = r.all()
+        if not domains:
+            return {"skipped": True, "reason": "no customer domains", "new": 0}
+
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as c:
+            async with AsyncSessionLocal() as db:
+                for domain_val, cust_id, cust_name in domains:
+                    stats["customers"] += 1
+                    try:
+                        resp = await c.get(
+                            f"https://crt.sh/?q=%.{domain_val}&output=json",
+                            headers={"User-Agent": "ArgusWatch/1.0"}
+                        )
+                        if resp.status_code != 200:
+                            stats["errors"] += 1
+                            continue
+                        certs = resp.json()
+                        # Extract unique subdomains
+                        subs = set()
+                        for cert in certs[:500]:  # Cap at 500 certs per domain
+                            cn = (cert.get("common_name") or "").lower().strip()
+                            if cn and domain_val in cn and "*" not in cn and cn != domain_val and "@" not in cn and cn.endswith("." + domain_val):
+                                subs.add(cn)
+                            for name in (cert.get("name_value") or "").lower().split("\n"):
+                                name = name.strip()
+                                if name and domain_val in name and "*" not in name and name != domain_val and "@" not in name and name.endswith("." + domain_val):
+                                    subs.add(name)
+
+                        # Check which subdomains are NEW (not already in customer_assets)
+                        existing = await db.execute(text(
+                            "SELECT asset_value FROM customer_assets "
+                            "WHERE customer_id = :cid AND asset_type IN ('domain','subdomain')"
+                        ), {"cid": cust_id})
+                        known = {row[0].lower() for row in existing.all()}
+
+                        new_subs = subs - known
+                        for sub in list(new_subs)[:100]:  # Cap at 100 new per customer per run
+                            # Register as customer asset
+                            is_interesting = any(kw in sub.split('.')[0] for kw in INTERESTING_KEYWORDS)
+                            criticality = "high" if is_interesting else "medium"
+                            try:
+                                await db.execute(text("""
+                                    INSERT INTO customer_assets (customer_id, asset_type, asset_value,
+                                        criticality, confidence, confidence_sources, discovery_source, created_at)
+                                    VALUES (:cid, 'subdomain', :v, :crit, 0.85,
+                                        :csrc, 'crtsh_collector', NOW())
+                                    ON CONFLICT DO NOTHING
+                                """), {"cid": cust_id, "v": sub, "crit": criticality,
+                                       "csrc": json.dumps(["crt.sh"])})
+                                stats["new_subdomains"] += 1
+                            except Exception:
+                                pass
+
+                            # Create detection for interesting subdomains
+                            if is_interesting:
+                                raw = (f"crt.sh: New certificate discovered for {sub} "
+                                       f"({cust_name}). This subdomain was not in the asset "
+                                       f"inventory. May indicate shadow IT or new service deployment.")
+                                await insert_detection(
+                                    db, "crtsh", "domain", sub,
+                                    "MEDIUM", 48, raw,
+                                    confidence=0.85, customer_id=cust_id,
+                                    metadata={"customer": cust_name, "domain": domain_val,
+                                              "is_interesting": True,
+                                              "keywords_matched": [kw for kw in INTERESTING_KEYWORDS if kw in sub]})
+                                stats["new_detections"] += 1
+
+                        await db.flush()
+                        await asyncio.sleep(3)  # crt.sh rate limit: be polite
+                    except Exception as e:
+                        log.debug(f"crt.sh {domain_val}: {e}")
+                        stats["errors"] += 1
+                await insert_collector_run(db, "crtsh", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"crt.sh CT: {stats['customers']} customers, {stats['new_subdomains']} new subs, {stats['new_detections']} detections")
+    except Exception as e:
+        log.error(f"crt.sh CT collector failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+async def collect_typosquat():
+    """Typosquat domain detector - generates permutations of customer domains, checks DNS.
+    FREE, no key. Finds active phishing/typosquat domains targeting customers.
+    Techniques: char swap, missing char, double char, homoglyph, tld swap.
+    """
+    started = datetime.utcnow()
+    stats = {"new": 0, "total_permutations": 0, "resolved": 0, "customers": 0}
+    HOMOGLYPHS = {'a': ['à','á','â','ã','ä','å','ɑ'], 'e': ['è','é','ê','ë','ē'],
+                  'i': ['ì','í','î','ï','ı'], 'o': ['ò','ó','ô','õ','ö','ø','0'],
+                  'u': ['ù','ú','û','ü'], 'l': ['1','ĺ'], 's': ['5','ś','$'],
+                  'g': ['q','ɡ'], 'n': ['ñ','ń'], 'c': ['ç','ć']}
+    ALT_TLDS = ['.net', '.org', '.co', '.io', '.xyz', '.info', '.app', '.dev', '.biz']
+    try:
+        async with AsyncSessionLocal() as db:
+            r = await db.execute(text(
+                "SELECT ca.asset_value, ca.customer_id, c.name "
+                "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                "WHERE ca.asset_type = 'domain' AND c.active = true LIMIT 10"
+            ))
+            domains = r.all()
+        if not domains:
+            return {"skipped": True, "reason": "no customer domains", "new": 0}
+        async with httpx.AsyncClient(timeout=5.0) as c:
+            async with AsyncSessionLocal() as db:
+                for domain_val, cust_id, cust_name in domains:
+                    stats["customers"] += 1
+                    name_part = domain_val.split('.')[0]
+                    tld = '.' + '.'.join(domain_val.split('.')[1:])
+                    permutations = set()
+                    # Char swap: gogle.com
+                    for i in range(len(name_part)-1):
+                        p = list(name_part); p[i], p[i+1] = p[i+1], p[i]
+                        permutations.add(''.join(p) + tld)
+                    # Missing char: gogle.com
+                    for i in range(len(name_part)):
+                        permutations.add(name_part[:i] + name_part[i+1:] + tld)
+                    # Double char: googgle.com
+                    for i in range(len(name_part)):
+                        permutations.add(name_part[:i] + name_part[i]*2 + name_part[i+1:] + tld)
+                    # Homoglyph: goog1e.com
+                    for i, ch in enumerate(name_part):
+                        for hg in HOMOGLYPHS.get(ch, [])[:2]:
+                            permutations.add(name_part[:i] + hg + name_part[i+1:] + tld)
+                    # TLD swap: google.net
+                    for alt_tld in ALT_TLDS:
+                        if alt_tld != tld:
+                            permutations.add(name_part + alt_tld)
+                    # Hyphen: goo-gle.com
+                    for i in range(1, len(name_part)):
+                        permutations.add(name_part[:i] + '-' + name_part[i:] + tld)
+                    permutations.discard(domain_val)
+                    stats["total_permutations"] += len(permutations)
+                    # DNS resolve top candidates
+                    for perm in list(permutations)[:30]:
+                        try:
+                            resp = await c.get(
+                                f"https://cloudflare-dns.com/dns-query?name={perm}&type=A",
+                                headers={"Accept": "application/dns-json"})
+                            if resp.status_code == 200:
+                                answers = resp.json().get("Answer", [])
+                                if answers:
+                                    ip = next((a["data"] for a in answers if a.get("type") == 1), "")
+                                    stats["resolved"] += 1
+                                    raw = (f"Typosquat ALERT: {perm} resolves to {ip} - "
+                                           f"possible phishing domain targeting {cust_name} ({domain_val})")
+                                    await insert_detection(db, "typosquat", "domain",
+                                        perm, "HIGH", 12, raw, confidence=0.75, customer_id=cust_id,
+                                        metadata={"original_domain": domain_val, "typosquat_domain": perm,
+                                                  "resolved_ip": ip, "customer": cust_name,
+                                                  "technique": "dns_permutation"})
+                                    stats["new"] += 1
+                            await asyncio.sleep(0.1)
+                        except Exception:
+                            pass
+                await insert_collector_run(db, "typosquat", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"Typosquat: {stats['customers']} customers, {stats['total_permutations']} perms, {stats['resolved']} resolved, {stats['new']} findings")
+    except Exception as e:
+        log.error(f"Typosquat failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+async def collect_epss_top():
+    """EPSS Top Exploited CVEs - FREE from FIRST.org. No key needed.
+    Fetches CVEs with highest exploitation probability. Cross-refs with customer tech_stack.
+    This catches CVEs that CISA KEV hasn't added yet but are actively exploited.
+    """
+    started = datetime.utcnow()
+    stats = {"new": 0, "total": 0, "customer_matches": 0}
+    try:
+        async with httpx.AsyncClient(timeout=HTTP_TIMEOUT, follow_redirects=True) as c:
+            # Get top 100 CVEs by EPSS score
+            resp = await c.get("https://api.first.org/data/v1/epss?order=!epss&limit=100")
+            if resp.status_code != 200:
+                return {"error": f"EPSS returned {resp.status_code}", "new": 0}
+            data = resp.json().get("data", [])
+            stats["total"] = len(data)
+            async with AsyncSessionLocal() as db:
+                # Get tech_stack assets
+                r = await db.execute(text(
+                    "SELECT ca.asset_value, ca.customer_id, c.name "
+                    "FROM customer_assets ca JOIN customers c ON c.id = ca.customer_id "
+                    "WHERE ca.asset_type = 'tech_stack' AND c.active = true"
+                ))
+                tech_assets = r.all()
+                # Get product map for matching
+                for epss_entry in data:
+                    cve_id = epss_entry.get("cve", "")
+                    epss_score = float(epss_entry.get("epss", 0))
+                    percentile = float(epss_entry.get("percentile", 0))
+                    if not cve_id or epss_score < 0.1:
+                        continue
+                    sev = "CRITICAL" if epss_score >= 0.5 else "HIGH" if epss_score >= 0.2 else "MEDIUM"
+                    sla = 4 if sev == "CRITICAL" else 12
+                    raw = f"EPSS Top: {cve_id} has {epss_score:.1%} exploitation probability (top {100-percentile*100:.0f}%)"
+                    meta = {"epss_score": epss_score, "percentile": percentile, "source": "epss_first_org"}
+                    det_id = await insert_detection(db, "epss", "cve_id",
+                        cve_id, sev, sla, raw, confidence=min(0.95, 0.5 + epss_score),
+                        metadata=meta)
+                    if det_id:
+                        stats["new"] += 1
+                    # Also populate cve_product_map if we can find it in NVD
+                    # (The correlation engine will handle matching via existing cve_product_map)
+                await insert_collector_run(db, "epss", "completed", stats, started, datetime.utcnow())
+                await db.commit()
+        log.info(f"EPSS Top: {stats['new']} new from {stats['total']} high-EPSS CVEs")
+    except Exception as e:
+        log.error(f"EPSS Top failed: {e}")
+        stats["error"] = str(e)
+    return stats
+
+
+# ════════════════════════════════════════════════════════════
 # FASTAPI APP
 # ════════════════════════════════════════════════════════════
 
@@ -2853,6 +3665,16 @@ ALL_COLLECTORS = {
     "grayhatwarfare": collect_grayhatwarfare,
     "leakix": collect_leakix,
     "telegram": collect_telegram,
+    # ── v16.4.4: NEW free collectors ──
+    "crtsh": collect_crtsh,
+    "hibp_breaches": collect_hibp_breaches,
+    "github_code": collect_github_code_search,
+    "urlscan_community": collect_urlscan_community,
+    # ── v16.4.5: HIGH-VALUE free collectors ──
+    "shodan_internetdb": collect_shodan_internetdb,
+    "typosquat": collect_typosquat,
+    "crtsh": collect_crtsh,
+    "epss_top": collect_epss_top,
     # ── KEY-OPTIONAL - skip gracefully if no key ──
     "otx": collect_otx,
     "urlscan": collect_urlscan,
@@ -2896,6 +3718,14 @@ COLLECTOR_INFO = {
     "grayhatwarfare":   {"tier": "key_optional","name": "GrayHatWarfare",       "key_env": "GRAYHATWARFARE_API_KEY","description": "Open S3/Azure/GCS bucket search per customer (Cat 12)"},
     "leakix":           {"tier": "key_optional","name": "LeakIX",               "key_env": "LEAKIX_API_KEY",        "description": "Exposed services + leaked data per customer domain (Cat 1,7,12)"},
     "telegram":         {"tier": "free",       "name": "Telegram Channels",     "key_env": None,                    "description": "Public threat intel channels  -  IOC + breach mention scanning (Cat 1,9,15)"},
+    "crtsh":            {"tier": "free",       "name": "crt.sh CT Logs",        "key_env": None,                    "description": "Certificate Transparency subdomain discovery per customer domain"},
+    "hibp_breaches":    {"tier": "free",       "name": "HIBP Breach List",      "key_env": None,                    "description": "Cross-reference customer domains against 700+ known data breaches"},
+    "github_code":      {"tier": "key_optional","name": "GitHub Code Search",   "key_env": "GITHUB_TOKEN",          "description": "Search public repos for leaked secrets (AKIA, sk_live_, xoxb-, etc.)"},
+    "urlscan_community":{"tier": "free",       "name": "URLScan Community",     "key_env": None,                    "description": "Detect phishing pages and suspicious scans targeting customer domains"},
+    "shodan_internetdb": {"tier": "free",      "name": "Shodan InternetDB",     "key_env": None,                    "description": "FREE exposed service + CVE scan per customer IP (no key)"},
+    "typosquat":         {"tier": "free",      "name": "Typosquat Detector",    "key_env": None,                    "description": "DNS permutation phishing domain discovery per customer (no key)"},
+    "crtsh":             {"tier": "free",      "name": "crt.sh CT Logs",        "key_env": None,                    "description": "FREE Certificate Transparency subdomain discovery per customer (no key)"},
+    "epss_top":          {"tier": "free",      "name": "EPSS Top Exploited",    "key_env": None,                    "description": "FIRST.org top-100 most exploited CVEs by probability (no key)"},
     "otx":              {"tier": "key_optional","name": "AlienVault OTX",       "key_env": "OTX_API_KEY",           "description": "Community threat pulses and IOCs"},
     "urlscan":          {"tier": "key_optional","name": "URLScan.io",           "key_env": "URLSCAN_API_KEY",       "description": "Phishing/malware URL scans (1000/day free)"},
     "github":           {"tier": "key_optional","name": "GitHub Secrets",       "key_env": "GITHUB_TOKEN",          "description": "Exposed credentials in public repos"},

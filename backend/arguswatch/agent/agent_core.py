@@ -58,7 +58,7 @@ async def _call_anthropic(messages: list[dict], tools: list[dict]) -> dict:
         })
 
     payload = {
-        "model": getattr(settings, "ANTHROPIC_MODEL", "claude-sonnet-4-5-20250929"),
+        "model": getattr(settings, "ANTHROPIC_MODEL", "claude-sonnet-4-6"),
         "max_tokens": 2048,
         "system": system_text,
         "tools": ant_tools,
@@ -160,13 +160,14 @@ async def _call_openai(messages: list[dict], tools: list[dict]) -> dict:
 
 async def _call_ollama(messages: list[dict], tools: list[dict]) -> dict:
     """Call Ollama with native tool calling (requires Ollama >=0.2 + compatible model)."""
-    # Ollama uses OpenAI-compatible format
     payload = {
         "model": settings.OLLAMA_MODEL,
         "messages": messages,
-        "tools": tools,
         "stream": False,
     }
+    # Only include tools if non-empty (empty tools array causes issues in some Ollama versions)
+    if tools:
+        payload["tools"] = tools
 
     async with httpx.AsyncClient(timeout=120.0) as client:
         resp = await client.post(

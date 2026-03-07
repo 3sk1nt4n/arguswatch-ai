@@ -76,11 +76,45 @@ async def route_detection(detection: Detection, db: AsyncSession) -> list[int]:
         asset_type=a.asset_type.value if hasattr(a.asset_type, "value") else str(a.asset_type),
         asset_value=a.asset_value,
         criticality=a.criticality or "medium",
-    ) for a in assets]
+    ) for a in assets
+        # V16.4.6: Skip unconfirmed industry defaults — they generate false CVE matches.
+        # Visible in UI but don't route until analyst confirms (changes discovery_source).
+        if not (
+            (a.asset_type.value if hasattr(a.asset_type, "value") else str(a.asset_type)) == "tech_stack"
+            and getattr(a, "discovery_source", None) == "industry_default"
+        )
+    ]
 
     matches = route_to_customers(detection.ioc_value, detection.ioc_type, records)
-    if not matches and detection.raw_text:
+    # V16.4.5: ONLY use raw_text fallback for IOCs that don't carry domain info.
+    RAW_TEXT_SAFE_TYPES = {
+        "cve_id", "advisory", "sha256", "sha1", "md5", "sha512",
+        "malware_hash", "apt_group", "ransomware_group", "campaign",
+    }
+    if not matches and detection.raw_text and detection.ioc_type in RAW_TEXT_SAFE_TYPES:
         matches = route_to_customers(detection.raw_text, detection.ioc_type, records)
+
+    # V16.4.6: Self-referential exclusion — don't route IOCs found ON a platform
+    # back TO that platform as a victim. Example: github_gist collector finds a URL
+    # on gist.github.com → don't create a finding for GitHub-the-customer.
+    _COLLECTOR_PLATFORMS = {
+        "github_gist":  {"github.com", "gist.github.com", "githubusercontent.com"},
+        "grep_app":     {"github.com", "gist.github.com", "githubusercontent.com"},
+        "paste":        {"pastebin.com", "dpaste.org", "rentry.co"},
+    }
+    if matches and detection.ioc_type in ("url", "uri", "domain", "fqdn", "hostname"):
+        src_platforms = _COLLECTOR_PLATFORMS.get(detection.source, set())
+        if src_platforms:
+            _url_m = re.search(r'https?://([^/?\s:]+)', detection.ioc_value.lower())
+            _ioc_dom = _url_m.group(1) if _url_m else detection.ioc_value.lower()
+            _on_platform = any(_ioc_dom == p or _ioc_dom.endswith("." + p) for p in src_platforms)
+            if _on_platform:
+                matches = [m for m in matches if not any(
+                    p == d or p.endswith("." + d)
+                    for p in src_platforms
+                    for d in [r.asset_value.lower() for r in records
+                              if r.customer_id == m.customer_id and r.asset_type == "domain"]
+                )]
 
     # ── CVE → cve_product_map → tech_stack routing ───────────────────────────
     # If a CVE ID arrives and no asset matched via text, look up the affected
@@ -205,8 +239,15 @@ async def route_detection(detection: Detection, db: AsyncSession) -> list[int]:
     return []
 
 
-async def correlate_new_detections(db: AsyncSession, limit: int = 100) -> dict:
-    """Route all unrouted detections to customers AND promote to findings."""
+async def correlate_new_detections(db: AsyncSession, limit: int = 100, ai_triage: bool = False) -> dict:
+    """Route all unrouted detections to customers AND promote to findings.
+    
+    V16.4.5: Now also:
+    - Populates match_proof JSON on findings
+    - Creates remediations via action_generator
+    - Generates enrichment_narrative for CVE findings
+    V16.4.6: ai_triage=True enables Ollama AI hooks (slow — only for targeted runs)
+    """
     r = await db.execute(
         select(Detection).where(
             Detection.customer_id == None,
@@ -214,7 +255,8 @@ async def correlate_new_detections(db: AsyncSession, limit: int = 100) -> dict:
         ).limit(limit)
     )
     unrouted = r.scalars().all()
-    stats = {"processed": len(unrouted), "routed": 0, "unrouted": 0, "findings_created": 0}
+    stats = {"processed": len(unrouted), "routed": 0, "unrouted": 0,
+             "findings_created": 0, "remediations_created": 0, "proofs_added": 0}
     for det in unrouted:
         matched = await route_detection(det, db)
         if matched:
@@ -225,6 +267,127 @@ async def correlate_new_detections(db: AsyncSession, limit: int = 100) -> dict:
                 f, is_new = await get_or_create_finding(det, db)
                 if is_new:
                     stats["findings_created"] += 1
+
+                    # ── V16.4.5: Populate match_proof ──────────────────────
+                    try:
+                        proof = {
+                            "correlation_type": det.correlation_type,
+                            "matched_asset": det.matched_asset,
+                            "ioc_value": det.ioc_value[:200],
+                            "ioc_type": det.ioc_type,
+                            "source": det.source,
+                            "confidence": det.confidence,
+                        }
+                        f.match_proof = proof
+                        stats["proofs_added"] += 1
+                    except Exception as e_proof:
+                        logger.debug(f"Match proof failed for finding {f.id}: {e_proof}")
+
+                    # ── V16.4.5: Generate remediation ──────────────────────
+                    try:
+                        from arguswatch.engine.action_generator import generate_action
+                        rem = await generate_action(f.id, db)
+                        if rem:
+                            stats["remediations_created"] += 1
+                    except Exception as e_rem:
+                        logger.debug(f"Remediation failed for finding {f.id}: {e_rem}")
+
+                    # ── V16.4.5: Enrichment narrative for CVE findings ─────
+                    try:
+                        if det.ioc_type == "cve_id" and not f.enrichment_narrative:
+                            f.enrichment_narrative = (
+                                f"CVE matched via {det.correlation_type} against "
+                                f"customer asset '{det.matched_asset}'. "
+                                f"Source: {det.source}. "
+                                f"Confidence: {det.confidence:.0%}."
+                            )
+                    except Exception as e_enrich:
+                        logger.debug(f"Enrichment narrative failed: {e_enrich}")
+
+                    # ── V16.4.5: Template ai_narrative (LLM-free fallback) ──
+                    try:
+                        if not f.ai_narrative:
+                            sev_str = _sev(f.severity) or "MEDIUM"
+                            src = det.source or "unknown"
+                            _NARR_TEMPLATES = {
+                                "cve_id": f"{src}: {det.ioc_value} affects {det.matched_asset or 'customer infrastructure'} — patch immediately if in-scope",
+                                "email_password_combo": f"{src}: Credential for {det.ioc_value.split(':')[0] if ':' in det.ioc_value else det.ioc_value[:30]} exposed — force password reset and enable MFA",
+                                "username_password_combo": f"{src}: Credential pair exposed — force password reset and audit login history",
+                                "breachdirectory_combo": f"{src}: Breach credential found — check for password reuse across corporate systems",
+                                "url": f"{src}: Suspicious URL {det.ioc_value[:50]} detected targeting customer domain",
+                                "domain": f"{src}: Suspicious domain {det.ioc_value} — possible phishing or typosquat",
+                                "email": f"{src}: Email address {det.ioc_value} found in threat feed — monitor for targeted attacks",
+                                "exposed_secret": f"{src}: Exposed secret/key found — rotate immediately",
+                                "privileged_credential": f"{src}: Privileged credential exposed — rotate and audit access logs",
+                                "malicious_url_path": f"{src}: Malicious URL path detected — block in WAF/proxy",
+                            }
+                            f.ai_narrative = _NARR_TEMPLATES.get(
+                                det.ioc_type,
+                                f"{src}: {sev_str} {det.ioc_type} finding — {det.ioc_value[:50]} matched via {det.correlation_type}"
+                            )
+                    except Exception as e_narr:
+                        logger.debug(f"AI narrative template failed: {e_narr}")
+
+                    # ── V16.4.6: AI TRIAGE via Ollama/Cloud (overrides template) ──
+                    # Only runs when ai_triage=True (not during bulk match-intel-all)
+                    if ai_triage:
+                      try:
+                        from arguswatch.services.ai_pipeline_hooks import (
+                            hook_ai_triage, hook_false_positive_check,
+                            hook_investigation_narrative, _pipeline_ai_available,
+                        )
+                        if _pipeline_ai_available():
+                            from arguswatch.models import Customer as _CustAI, SeverityLevel as _SevAI
+                            _cctx = {"matched_asset": det.matched_asset or ""}
+                            if det.customer_id:
+                                _cr_ai = await db.execute(
+                                    select(_CustAI).where(_CustAI.id == det.customer_id))
+                                _c_ai = _cr_ai.scalar_one_or_none()
+                                if _c_ai:
+                                    _cctx.update({"industry": _c_ai.industry or "",
+                                                  "name": _c_ai.name, "customer_id": _c_ai.id})
+                            _enrich = {"vt_malicious": 0, "abuse_score": 0, "otx_pulses": 0}
+
+                            # AI severity triage
+                            _ai_t = await hook_ai_triage(
+                                ioc_type=det.ioc_type or "", ioc_value=det.ioc_value or "",
+                                source=det.source or "unknown", enrichment_data=_enrich,
+                                customer_context=_cctx, raw_text=(det.raw_text or "")[:800],
+                            )
+                            if _ai_t and "severity" in _ai_t:
+                                f.severity = _SevAI(_ai_t["severity"])
+                                f.confidence = float(_ai_t.get("confidence", f.confidence or 0.5))
+                                f.ai_severity_decision = _ai_t["severity"]
+                                f.ai_severity_reasoning = _ai_t.get("reasoning", "")
+                                f.ai_provider = _ai_t.get("provider", "")
+                                stats["ai_triaged"] = stats.get("ai_triaged", 0) + 1
+                                logger.info(f"AI triage: {det.ioc_value[:40]} → {_ai_t['severity']}")
+
+                            # AI false positive check
+                            _ai_fp = await hook_false_positive_check(
+                                ioc_type=det.ioc_type or "", ioc_value=det.ioc_value or "",
+                                source=det.source or "unknown", enrichment_data=_enrich,
+                                customer_context=_cctx,
+                            )
+                            if _ai_fp and _ai_fp.get("is_fp") and _ai_fp.get("confidence", 0) > 0.75:
+                                f.ai_false_positive_flag = True
+                                f.ai_false_positive_reason = _ai_fp.get("reason", "")
+                                logger.info(f"AI FP flag: {det.ioc_value[:40]} — {_ai_fp.get('reason','')[:60]}")
+
+                            # AI narrative (replaces template if better)
+                            try:
+                                _ai_narr = await hook_investigation_narrative(
+                                    ioc_type=det.ioc_type or "", ioc_value=det.ioc_value or "",
+                                    source=det.source or "unknown", enrichment_data=_enrich,
+                                    customer_context=_cctx,
+                                )
+                                if _ai_narr and _ai_narr.get("narrative"):
+                                    f.ai_narrative = _ai_narr["narrative"]
+                            except Exception:
+                                pass  # Keep template narrative
+                      except Exception as e_ai:
+                        logger.debug(f"AI triage hooks failed (template retained): {e_ai}")
+
             except Exception as e:
                 logger.warning(f"Finding promotion failed for det {det.id}: {e}")
         else:
@@ -274,3 +437,54 @@ def run_correlation_task():
         async with async_session() as db:
             return await correlate_new_detections(db)
     return asyncio.run(_run())
+
+
+async def backfill_findings(db: AsyncSession) -> dict:
+    """V16.4.5: Backfill match_proof, remediations, and enrichment_narrative
+    for existing findings that are missing them."""
+    from arguswatch.models import Finding, FindingRemediation
+    stats = {"proofs_added": 0, "remediations_created": 0, "narratives_added": 0}
+
+    r = await db.execute(select(Finding))
+    findings = r.scalars().all()
+
+    for f in findings:
+        # ── match_proof ───────────────────────────────────────────────
+        if not f.match_proof or f.match_proof == {}:
+            f.match_proof = {
+                "correlation_type": f.correlation_type,
+                "matched_asset": f.matched_asset,
+                "ioc_value": f.ioc_value[:200] if f.ioc_value else "",
+                "ioc_type": f.ioc_type,
+                "sources": f.all_sources or [],
+                "confidence": f.confidence,
+            }
+            stats["proofs_added"] += 1
+
+        # ── enrichment_narrative for CVEs ─────────────────────────────
+        if f.ioc_type == "cve_id" and not f.enrichment_narrative:
+            f.enrichment_narrative = (
+                f"CVE matched via {f.correlation_type} against "
+                f"customer asset '{f.matched_asset}'. "
+                f"Sources: {', '.join(f.all_sources or ['unknown'])}. "
+                f"Confidence: {f.confidence:.0%}."
+            )
+            stats["narratives_added"] += 1
+
+        # ── remediations ──────────────────────────────────────────────
+        existing_rem = await db.execute(
+            select(FindingRemediation).where(
+                FindingRemediation.finding_id == f.id
+            ).limit(1)
+        )
+        if not existing_rem.scalar_one_or_none():
+            try:
+                from arguswatch.engine.action_generator import generate_action
+                rem = await generate_action(f.id, db)
+                if rem:
+                    stats["remediations_created"] += 1
+            except Exception as e:
+                logger.debug(f"Backfill remediation failed for finding {f.id}: {e}")
+
+    await db.flush()
+    return stats

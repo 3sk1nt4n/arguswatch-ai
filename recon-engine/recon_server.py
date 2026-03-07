@@ -289,9 +289,14 @@ async def full_recon(customer_id: int, domain: str):
     log.info(f"{'='*50}")
     started = datetime.utcnow()
     assets_created = 0
+    ASSET_CAP = 200  # V16.4.6: Safety cap — flag for review if recon finds more than this
 
     async def save_asset(atype, aval, crit, conf, source):
         nonlocal assets_created
+        if assets_created >= ASSET_CAP:
+            if assets_created == ASSET_CAP:
+                log.warning(f"ASSET CAP ({ASSET_CAP}) reached for customer {customer_id} / {domain} — skipping remaining")
+            return  # Stop adding assets after cap
         async with ASession() as db:
             # Dedup
             check = await db.execute(text(

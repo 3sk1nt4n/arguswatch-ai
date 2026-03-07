@@ -1,0 +1,93 @@
+customer_name,industry,tier,contact_email,asset_type,asset_value,criticality
+Yahoo,technology,enterprise,security@yahoo.com,domain,yahoo.com,critical
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,mail.yahoo.com,critical
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,login.yahoo.com,critical
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,sports.yahoo.com,high
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,finance.yahoo.com,high
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,news.yahoo.com,high
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,api.yahoo.com,critical
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,m.yahoo.com,high
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,developer.yahoo.com,high
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,ads.yahoo.com,medium
+Yahoo,technology,enterprise,security@yahoo.com,subdomain,search.yahoo.com,high
+Yahoo,technology,enterprise,security@yahoo.com,email_domain,yahoo.com,critical
+Yahoo,technology,enterprise,security@yahoo.com,keyword,yahoo,critical
+Yahoo,technology,enterprise,security@yahoo.com,brand_name,Yahoo,critical
+Yahoo,technology,enterprise,security@yahoo.com,brand_name,Yahoo Mail,critical
+Yahoo,technology,enterprise,security@yahoo.com,brand_name,Yahoo Finance,high
+Yahoo,technology,enterprise,security@yahoo.com,org_name,Yahoo Inc,high
+Shopify,technology,premium,security@shopify.com,domain,shopify.com,critical
+Shopify,technology,premium,security@shopify.com,subdomain,accounts.shopify.com,critical
+Shopify,technology,premium,security@shopify.com,subdomain,admin.shopify.com,critical
+Shopify,technology,premium,security@shopify.com,subdomain,apps.shopify.com,high
+Shopify,technology,premium,security@shopify.com,subdomain,cdn.shopify.com,high
+Shopify,technology,premium,security@shopify.com,subdomain,partners.shopify.com,high
+Shopify,technology,premium,security@shopify.com,subdomain,help.shopify.com,medium
+Shopify,technology,premium,security@shopify.com,subdomain,checkout.shopify.com,critical
+Shopify,technology,premium,security@shopify.com,subdomain,api.shopify.com,critical
+Shopify,technology,premium,security@shopify.com,subdomain,themes.shopify.com,medium
+Shopify,technology,premium,security@shopify.com,email_domain,shopify.com,critical
+Shopify,technology,premium,security@shopify.com,keyword,shopify,critical
+Shopify,technology,premium,security@shopify.com,brand_name,Shopify,critical
+Shopify,technology,premium,security@shopify.com,brand_name,Shopify Payments,high
+Shopify,technology,premium,security@shopify.com,org_name,Shopify Inc,high
+Shopify,technology,premium,security@shopify.com,github_org,Shopify,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,domain,vulnweb.com,critical
+VulnWeb Demo,technology,standard,admin@vulnweb.com,subdomain,testphp.vulnweb.com,critical
+VulnWeb Demo,technology,standard,admin@vulnweb.com,subdomain,testhtml5.vulnweb.com,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,subdomain,testasp.vulnweb.com,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,subdomain,testaspnet.vulnweb.com,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,subdomain,rest.vulnweb.com,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,email_domain,vulnweb.com,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,keyword,vulnweb,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,keyword,acunetix,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,brand_name,VulnWeb,high
+VulnWeb Demo,technology,standard,admin@vulnweb.com,brand_name,Acunetix,high
+Uber,transportation,enterprise,security@uber.com,domain,uber.com,critical
+Uber,transportation,enterprise,security@uber.com,subdomain,auth.uber.com,critical
+Uber,transportation,enterprise,security@uber.com,subdomain,riders.uber.com,critical
+Uber,transportation,enterprise,security@uber.com,subdomain,drivers.uber.com,critical
+Uber,transportation,enterprise,security@uber.com,subdomain,developer.uber.com,high
+Uber,transportation,enterprise,security@uber.com,subdomain,api.uber.com,critical
+Uber,transportation,enterprise,security@uber.com,subdomain,m.uber.com,high
+Uber,transportation,enterprise,security@uber.com,subdomain,partners.uber.com,high
+Uber,transportation,enterprise,security@uber.com,subdomain,eats.uber.com,high
+Uber,transportation,enterprise,security@uber.com,subdomain,freight.uber.com,medium
+Uber,transportation,enterprise,security@uber.com,subdomain,login.uber.com,critical
+Uber,transportation,enterprise,security@uber.com,email_domain,uber.com,critical
+Uber,transportation,enterprise,security@uber.com,keyword,uber,critical
+Uber,transportation,enterprise,security@uber.com,brand_name,Uber,critical
+Uber,transportation,enterprise,security@uber.com,brand_name,Uber Eats,high
+Uber,transportation,enterprise,security@uber.com,brand_name,Uber Freight,medium
+Uber,transportation,enterprise,security@uber.com,org_name,Uber Technologies Inc,high
+Starbucks,retail,premium,security@starbucks.com,domain,starbucks.com,critical
+Starbucks,retail,premium,security@starbucks.com,subdomain,app.starbucks.com,critical
+Starbucks,retail,premium,security@starbucks.com,subdomain,www.starbucks.com,high
+Starbucks,retail,premium,security@starbucks.com,subdomain,rewards.starbucks.com,critical
+Starbucks,retail,premium,security@starbucks.com,subdomain,store.starbucks.com,high
+Starbucks,retail,premium,security@starbucks.com,subdomain,openapi.starbucks.com,high
+Starbucks,retail,premium,security@starbucks.com,subdomain,card.starbucks.com,critical
+Starbucks,retail,premium,security@starbucks.com,subdomain,preview.starbucks.com,medium
+Starbucks,retail,premium,security@starbucks.com,subdomain,content.starbucks.com,medium
+Starbucks,retail,premium,security@starbucks.com,email_domain,starbucks.com,critical
+Starbucks,retail,premium,security@starbucks.com,keyword,starbucks,critical
+Starbucks,retail,premium,security@starbucks.com,brand_name,Starbucks,critical
+Starbucks,retail,premium,security@starbucks.com,brand_name,Starbucks Rewards,high
+Starbucks,retail,premium,security@starbucks.com,org_name,Starbucks Corporation,high
+GitHub,technology,enterprise,security@github.com,domain,github.com,critical
+GitHub,technology,enterprise,security@github.com,subdomain,api.github.com,critical
+GitHub,technology,enterprise,security@github.com,subdomain,gist.github.com,high
+GitHub,technology,enterprise,security@github.com,subdomain,raw.githubusercontent.com,critical
+GitHub,technology,enterprise,security@github.com,subdomain,pages.github.com,high
+GitHub,technology,enterprise,security@github.com,subdomain,education.github.com,medium
+GitHub,technology,enterprise,security@github.com,subdomain,enterprise.github.com,critical
+GitHub,technology,enterprise,security@github.com,subdomain,copilot.github.com,high
+GitHub,technology,enterprise,security@github.com,subdomain,actions.github.com,critical
+GitHub,technology,enterprise,security@github.com,subdomain,security.github.com,high
+GitHub,technology,enterprise,security@github.com,email_domain,github.com,critical
+GitHub,technology,enterprise,security@github.com,keyword,github,critical
+GitHub,technology,enterprise,security@github.com,brand_name,GitHub,critical
+GitHub,technology,enterprise,security@github.com,brand_name,GitHub Copilot,high
+GitHub,technology,enterprise,security@github.com,brand_name,GitHub Actions,high
+GitHub,technology,enterprise,security@github.com,org_name,GitHub Inc,high
+GitHub,technology,enterprise,security@github.com,github_org,github,critical

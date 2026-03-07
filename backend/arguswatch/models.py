@@ -284,6 +284,9 @@ class Finding(Base):
     # ── Breach status ───────────────────────────────────────────────────────
     confirmed_exposure = Column(Boolean, default=False)         # True = data confirmed in attacker hands
     exposure_type = Column(String(50), nullable=True)           # ransomware_leak, stealer_log, credential_dump, data_exfiltration
+    # V16.4.5: Missing from model but exist in DB
+    match_proof = Column(JSON, default=dict)                    # correlation proof chain
+    enrichment_narrative = Column(Text, nullable=True)          # per-finding enrichment context
     # Relationships
     customer = relationship("Customer")
     actor = relationship("ThreatActor")

@@ -1,45 +1,7 @@
-# Python
-__pycache__/
-*.py[cod]
-*.egg-info/
-*.egg
-dist/
-build/
-.eggs/
-*.whl
-venv/
-.venv/
-
-# Environment
+﻿__pycache__/
+*.pyc
 .env
-!.env.example
-
-# Docker
-data/
+*.egg-info/
+node_modules/
+.pytest_cache/
 *.log
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Ollama models (huge)
-ollama_data/
-
-# Prometheus data
-prometheus_data/
-
-# Postgres data
-pgdata/
-
-# Certs (generated at runtime)
-nginx/certs/
-
-# Zip deliverables
-*.zip

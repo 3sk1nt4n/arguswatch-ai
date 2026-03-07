@@ -18,13 +18,13 @@ class IOCMatch:
 # ── Category 1: Stolen Credentials ──
 CRED_PATTERNS = [
     (r'[\w\.\-\+]+@[\w\.\-]+\.[a-z]{2,}:[\S]{6,}', 'email_password_combo', 0.85),
-    (r'[\w\.\-]{3,}:[\S]{6,}:[\S]{6,}', 'username_password_combo', 0.75),
+    (r'[\w\.\-]{3,}:[^\s\{\}\(\);,]{6,}:[^\s\{\}\(\);,]{6,}', 'username_password_combo', 0.75),
     (r'[\w\.\-\+]+@[\w\.\-]+\.[a-z]{2,}:[a-f0-9]{32,64}', 'email_hash_combo', 0.85),
     (r'(?:rdp|ssh|vnc|ftp)://[\w\.\-]+:[\S]+@[\w\.\-\.]+', 'remote_credential', 0.90),
     (r'(?:mysql|postgresql|mssql|mongodb|redis)://[\S]+:[\S]+@[\S]+', 'db_connection_string', 0.92),
     (r'(?:CN|OU|DC)=[\w\s\,\=]+,DC=[\w]+', 'ldap_dn', 0.80),
     (r'(?:password|passwd|pwd)\s*[=:]\s*["\']?[\S]{8,}["\']?', 'plaintext_password', 0.80),
-    (r'\b(?:[a-z ]{3,8} ){11,23}(?:[a-z]{3,8})\b', 'crypto_seed_phrase', 0.70),
+    # V16.4.6: REMOVED crypto_seed_phrase — 12+ english words matches every README/doc. Massive FP rate.
     # BreachDirectory plaintext format
     (r'[\w\.\-\+]+@[\w\.\-]+:[^\s\|]{6,}', 'breachdirectory_combo', 0.88),
 ]
@@ -41,19 +41,19 @@ API_KEY_PATTERNS = [
     (r'\bxoxb-[0-9]{11}-[0-9]{11}-[A-Za-z0-9]{24}\b', 'slack_bot_token', 0.99),
     (r'\bxoxp-[0-9]{11}-[0-9]{11}-[0-9]{11}-[A-Za-z0-9]{32}\b', 'slack_user_token', 0.99),
     (r'\bsk_live_[A-Za-z0-9]{24,}\b', 'stripe_live_key', 0.99),
-    (r'\bsk_test_[A-Za-z0-9]{24,}\b', 'stripe_test_key', 0.95),
-    (r'\bsk-[A-Za-z0-9]{48}\b', 'openai_api_key', 0.99),
-    (r'\bsk-ant-api[0-9]{2}-[A-Za-z0-9\-_]{93}\b', 'anthropic_api_key', 0.99),
-    (r'\bSG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}\b', 'sendgrid_api_key', 0.99),
+    # V16.4.6: REMOVED stripe_test_key — sk_test_ keys are intentionally public. Not a security threat.
+    (r'\bsk-[A-Za-z0-9]{20,}\b', 'openai_api_key', 0.92),
+    (r'\bsk-(?:proj|prod|live)-[A-Za-z0-9\-_]{20,}\b', 'openai_api_key', 0.99),
+    (r'\bsk-ant-api[0-9]{2}-[A-Za-z0-9\-_]{40,}\b', 'anthropic_api_key', 0.99),
+    (r'\bSG\.[A-Za-z0-9\-_]{15,}\.[A-Za-z0-9\-_]{15,}\b', 'sendgrid_api_key', 0.99),
     (r'\bAC[a-z0-9]{32}\b', 'twilio_account_sid', 0.90),
-    (r'\bSK[a-z0-9]{32}\b', 'twilio_auth_token', 0.85),
+    # V16.4.6: REMOVED twilio_auth_token — SK+32hex overlaps with Stripe keys, random hashes. Too many FPs.
     (r'\b[A-Za-z0-9_\-]{32,}\.blob\.core\.windows\.net[^\s]*sig=[A-Za-z0-9%]+', 'azure_sas_token', 0.92),
     (r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----', 'private_key', 0.99),
-    (r'\b[A-Za-z0-9+/]{32,}={0,2}\.[A-Za-z0-9+/]{32,}={0,2}\.[A-Za-z0-9+/\-_]{32,}\b', 'jwt_token', 0.85),
-    (r'\bey[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_]+\b', 'jwt_token_alt', 0.88),
+    (r'\bey[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\.[A-Za-z0-9\-_]{10,}\b', 'jwt_token', 0.88),
     # OAuth tokens (Category 11)
     (r'\bya29\.[A-Za-z0-9\-_]+\b', 'google_oauth_token', 0.99),
-    (r'\bghp_[A-Za-z0-9]{36,}\b', 'github_fine_grained_pat', 0.99),
+    (r'\bgithub_pat_[A-Za-z0-9_]{20,}\b', 'github_fine_grained_pat', 0.99),
 ]
 
 # ── Category 3: Network IOCs ──
@@ -120,7 +120,7 @@ SESSION_PATTERNS = [
     (r'[A-Za-z0-9+/]{86}==', 'saml_assertion', 0.75),
     (r'krb5cc_[\w\d]+', 'kerberos_ccache', 0.95),
     (r'(?:NTLM|ntlm)\s+[A-Za-z0-9+/=]{20,}', 'ntlm_hash', 0.90),
-    (r'\b[a-fA-F0-9]{32}:[a-fA-F0-9]{32}\b', 'ntlm_hash_format', 0.88),
+    (r'\b[a-fA-F0-9]{16,32}:[a-fA-F0-9]{32}\b', 'ntlm_hash_format', 0.92),
 ]
 
 # ── Category 11: OAuth / SaaS Access Tokens ──
@@ -130,8 +130,8 @@ OAUTH_PATTERNS = [
     (r'\bxoxb-[0-9\-A-Za-z]{50,}\b', 'slack_bot_oauth', 0.99),
     (r'\bghu_[A-Za-z0-9]{36}\b', 'github_user_token', 0.99),
     (r'\bgh[ps]_[A-Za-z0-9]{36,}\b', 'github_saas_token', 0.95),
-    (r'\bAzure[A-Za-z0-9\-_\.]{40,}\b', 'azure_bearer', 0.85),
-    (r'Authorization:\s*Bearer\s+[A-Za-z0-9\-_\.=]+', 'bearer_token_header', 0.88),
+    (r'(?:AZURE_CLIENT_SECRET|AZURE_TENANT_SECRET|AZURE_TOKEN)\s*[=:]\s*["\']?[A-Za-z0-9\-_\.~]{20,}["\']?', 'azure_bearer', 0.90),
+    # V16.4.6: REMOVED bearer_token_header — "Authorization: Bearer" in every API tutorial. Extreme noise.
 ]
 
 # ── Category 12: SaaS Misconfiguration ──
@@ -167,7 +167,7 @@ SHADOWIT_PATTERNS = [
 #   - Transfer commands to external hosts
 DATAEXFIL_PATTERNS = [
     # Transfer/staging commands
-    (r'(?:wget|curl|scp|rsync).*(?:http|ftp)://(?!\b(?:localhost|127\.0\.0\.1)\b)[\w\.\-]+/[\S]+', 'data_transfer_cmd', 0.85),
+    (r'(?:wget|curl|scp|rsync).*(?:https?|ftp)://(?!\b(?:localhost|127\.0\.0\.1)\b)[\w\.\-]+/[\S]+', 'data_transfer_cmd', 0.85),
     (r'tar\s+(?:\-\w+\s+)*[\w\.\-]+\.(?:tar\.gz|tgz|zip)\s+(?:&|\|)', 'archive_and_exfil', 0.80),
     (r'base64\s+(?:\-\w+\s+)?/[\S]+\s*(?:>|>>|&&|\|)', 'base64_exfil', 0.85),
     (r'(?:megaupload|anonfiles|gofile|wetransfer|transfer\.sh)/[\S]+', 'file_share_exfil', 0.88),
@@ -197,23 +197,26 @@ CRYPTO_PATTERNS = [
 ]
 
 ALL_CATEGORIES = [
+    # V16.4.5: Ordered specific→generic so NTLM hash isn't eaten by md5,
+    # data_transfer_cmd isn't eaten by URL, etc.
     ('stolen_credentials',      CRED_PATTERNS),
     ('api_keys_tokens',         API_KEY_PATTERNS),
+    ('oauth_saas_tokens',       OAUTH_PATTERNS),
+    ('session_auth_tokens',     SESSION_PATTERNS),
+    ('privileged_account',      PRIVACCOUNT_PATTERNS),
+    ('data_exfil_anomaly',      DATAEXFIL_PATTERNS),
+    ('infra_code_leaks',        INFRA_PATTERNS),
+    ('threat_actor_intel',      ACTOR_PATTERNS),
+    ('financial_identity',      FINANCIAL_PATTERNS),
+    ('saas_misconfiguration',   SAAS_MISCONFIG_PATTERNS),
+    ('shadow_it',               SHADOWIT_PATTERNS),
+    ('cve',                     CVE_PATTERNS),
+    ('crypto',                  CRYPTO_PATTERNS),
+    # Generic patterns LAST - so they don't steal specific matches
     ('network_iocs',            NETWORK_PATTERNS),
     ('domain_url_iocs',         DOMAIN_PATTERNS),
     ('email_iocs',              EMAIL_PATTERNS),
     ('file_hash_iocs',          HASH_PATTERNS),
-    ('infra_code_leaks',        INFRA_PATTERNS),
-    ('financial_identity',      FINANCIAL_PATTERNS),
-    ('threat_actor_intel',      ACTOR_PATTERNS),
-    ('session_auth_tokens',     SESSION_PATTERNS),
-    ('oauth_saas_tokens',       OAUTH_PATTERNS),
-    ('saas_misconfiguration',   SAAS_MISCONFIG_PATTERNS),
-    ('privileged_account',      PRIVACCOUNT_PATTERNS),
-    ('shadow_it',               SHADOWIT_PATTERNS),
-    ('data_exfil_anomaly',      DATAEXFIL_PATTERNS),
-    ('cve',                     CVE_PATTERNS),
-    ('crypto',                  CRYPTO_PATTERNS),
 ]
 
 # Compiled patterns cache

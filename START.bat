@@ -1,6 +1,6 @@
 @echo off
 echo =========================================
-echo   ArgusWatch AI-Agentic Threat Intelligence v16.4.1 - One Click Start
+echo   ArgusWatch AI-Agentic Threat Intelligence v16.4.6 - One Click Start
 echo   Solvent CyberSecurity LLC
 echo =========================================
 echo.

@@ -1,5 +1,7 @@
 """ArgusWatch AI-Agentic Threat Intelligence V16.4.1 - FastAPI backend."""
 import os
+import re
+import socket
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -14,7 +16,7 @@ from typing import Optional
 from arguswatch.config import settings
 from arguswatch.database import get_db
 from arguswatch.models import (Detection, SeverityLevel, DetectionStatus, Customer,
-    CustomerAsset, ThreatActor, CustomerExposure, DarkWebMention, CollectorRun, Enrichment)
+    CustomerAsset, ThreatActor, CustomerExposure, DarkWebMention, CollectorRun, Enrichment, Finding)
 from arguswatch.api.customers import router as customers_router
 from arguswatch.api.detections import router as detections_router
 from arguswatch.api.enrichments import enrich_router, remed_router
@@ -928,10 +930,44 @@ async def onboard_customer(request: Request, db: AsyncSession = Depends(get_db))
     if errors:
         return {"error": "Validation failed", "details": errors}
     
+    # ── V16.4.6: Domain-name sanity check ──
+    # Prevents onboarding "PAYPAL" with domain "apple.com"
+    confirm = body.get("confirm", False)
+    if name and domain and not confirm:
+        d_root = domain.lower().replace("www.", "").split(".")[0]
+        name_words = re.findall(r'[a-z0-9]{3,}', name.lower())
+        name_concat = "".join(name_words)
+        acronym = "".join(w[0] for w in name_words) if len(name_words) >= 2 else ""
+        domain_ok = any(w in d_root or d_root in w for w in name_words) or \
+                    d_root in name_concat or name_concat in d_root or \
+                    (acronym and (acronym == d_root or d_root.startswith(acronym)))
+        if not domain_ok:
+            return {
+                "error": "Domain mismatch",
+                "detail": f"Company '{name}' and domain '{domain}' have no apparent connection. "
+                          f"If this is intentional, resend with \"confirm\": true.",
+                "name_words": name_words,
+                "domain_root": d_root,
+            }
+    
+    # ── V16.4.6: DNS validation — domain must actually resolve ──
+    if domain and not confirm:
+        try:
+            socket.getaddrinfo(domain, None)
+        except socket.gaierror:
+            return {
+                "error": "Domain does not resolve",
+                "detail": f"'{domain}' has no DNS A record. Check for typos. "
+                          f"If this is intentional (e.g. internal domain), resend with \"confirm\": true.",
+            }
+    
     # ── STEP 1: Create customer ──
-    existing = await db.execute(select(Customer).where(Customer.name == name))
-    if existing.scalar_one_or_none():
+    try:
+      existing = await db.execute(select(Customer).where(Customer.name == name))
+      if existing.scalar_one_or_none():
         return {"error": f"Customer '{name}' already exists"}
+    except Exception as e:
+      return JSONResponse(status_code=500, content={"error": "DB check failed", "detail": str(e)[:200]})
     
     customer = Customer(
         name=name, industry=industry, tier=tier,
@@ -1174,6 +1210,34 @@ async def onboard_customer(request: Request, db: AsyncSession = Depends(get_db))
         except Exception:
             result["recon"]["retry_scheduled"] = False
     
+    # ── STEP 3b: V16.4.5 Trigger customer-targeted collectors immediately ──
+    # These search FOR this specific customer's domain on free threat intel sources.
+    # Without this, collectors only run on the hourly cycle = customer waits 1h for findings.
+    proxy_url = os.environ.get("INTEL_PROXY_URL", "http://intel-proxy:9000")
+    targeted_collectors = ["hudsonrock", "hibp_breaches", "typosquat", "pulsedive",
+                           "leakix", "urlscan_community", "ransomwatch", "epss_top",
+                           "shodan_internetdb", "crtsh"]  # V16.4.6: shodan + crtsh added
+    targeted_results = {}
+    try:
+        async with httpx_client.AsyncClient(timeout=30.0) as c:
+            for coll_name in targeted_collectors:
+                try:
+                    resp = await c.post(f"{proxy_url}/collect/{coll_name}")
+                    if resp.status_code == 200:
+                        coll_data = resp.json()
+                        new_count = coll_data.get("new", 0)
+                        if new_count > 0:
+                            targeted_results[coll_name] = new_count
+                except Exception:
+                    pass  # Non-blocking - don't fail onboard if a collector times out
+        result["targeted_collection"] = {
+            "collectors_triggered": len(targeted_collectors),
+            "new_detections": targeted_results,
+            "total_new": sum(targeted_results.values()),
+        }
+    except Exception as e:
+        result["targeted_collection"] = {"error": str(e)[:100]}
+
     # ── STEP 4: Immediate intel matching (don't wait 30min) ──
     try:
         from arguswatch.engine.customer_intel_matcher import match_customer_intel
@@ -1228,10 +1292,11 @@ async def onboard_customer(request: Request, db: AsyncSession = Depends(get_db))
     try:
         from arguswatch.engine.action_generator import generate_action
         from sqlalchemy import select as sel2
+        from arguswatch.models import Finding as _F4b, SeverityLevel as _SL4b
         new_findings = await db.execute(
-            sel2(Finding).where(
-                Finding.customer_id == cid,
-                Finding.severity.in_(["CRITICAL", "HIGH", "MEDIUM"]),
+            sel2(_F4b).where(
+                _F4b.customer_id == cid,
+                _F4b.severity.in_([_SL4b.CRITICAL, _SL4b.HIGH, _SL4b.MEDIUM]),
             )
         )
         remed_count = 0
@@ -2084,9 +2149,202 @@ async def customer_sla_compliance(cid: int, db: AsyncSession = Depends(get_db)):
 
 @app.post("/api/match-intel-all", dependencies=[Depends(require_role("admin", "analyst"))])
 async def match_all_intel_endpoint(db: AsyncSession = Depends(get_db)):
-    """Match ALL global detections against ALL customers' assets."""
+    """Match ALL global detections against ALL customers' assets. No AI (fast)."""
     from arguswatch.engine.customer_intel_matcher import match_all_customers
     return await match_all_customers(db)
+
+
+@app.post("/api/ai-triage", dependencies=[Depends(require_role("admin", "analyst"))])
+async def ai_triage_endpoint(limit: int = 5, db: AsyncSession = Depends(get_db)):
+    """Run AI triage on findings that haven't been triaged yet.
+    Default: 5 findings at a time (~3-5 min with Ollama qwen2.5:14b).
+    Call repeatedly to process more.
+    """
+    from arguswatch.services.ai_pipeline_hooks import (
+        hook_ai_triage, hook_false_positive_check,
+        hook_investigation_narrative, _pipeline_ai_available, _provider,
+    )
+    from arguswatch.models import Finding, Customer, SeverityLevel
+
+    if not _pipeline_ai_available():
+        return {"error": "No AI provider available. Check Ollama or set ANTHROPIC_API_KEY."}
+
+    # Find findings without AI triage
+    r = await db.execute(
+        select(Finding).where(
+            Finding.ai_provider == None,
+            Finding.status.notin_(["FALSE_POSITIVE", "VERIFIED_CLOSED"]),
+        ).order_by(Finding.created_at.desc()).limit(min(limit, 20))
+    )
+    findings = r.scalars().all()
+    if not findings:
+        return {"message": "All findings already triaged", "triaged": 0, "provider": _provider()}
+
+    stats = {"triaged": 0, "fp_flagged": 0, "narratives": 0, "errors": 0, "provider": _provider(), "details": []}
+
+    for f in findings:
+        try:
+            # Build customer context
+            cctx = {"matched_asset": f.matched_asset or ""}
+            if f.customer_id:
+                cr = await db.execute(select(Customer).where(Customer.id == f.customer_id))
+                cust = cr.scalar_one_or_none()
+                if cust:
+                    cctx.update({"industry": cust.industry or "", "name": cust.name, "customer_id": cust.id})
+
+            enrich = {"vt_malicious": 0, "abuse_score": 0, "otx_pulses": 0}
+
+            # 1. AI severity triage
+            ai_t = await hook_ai_triage(
+                ioc_type=f.ioc_type or "", ioc_value=f.ioc_value or "",
+                source=(f.all_sources or ["unknown"])[0] if isinstance(f.all_sources, list) else "unknown",
+                enrichment_data=enrich, customer_context=cctx,
+                raw_text="",
+            )
+            if ai_t and "severity" in ai_t:
+                f.severity = SeverityLevel(ai_t["severity"])
+                f.confidence = float(ai_t.get("confidence", f.confidence or 0.5))
+                f.ai_severity_decision = ai_t["severity"]
+                f.ai_severity_reasoning = ai_t.get("reasoning", "")
+                f.ai_provider = ai_t.get("provider", "")
+                stats["triaged"] += 1
+                stats["details"].append({"ioc": (f.ioc_value or "")[:40], "severity": ai_t["severity"]})
+            else:
+                stats["errors"] += 1
+                stats["details"].append({"ioc": (f.ioc_value or "")[:40], "error": "AI returned empty/invalid response"})
+
+            # 2. AI false positive check
+            ai_fp = await hook_false_positive_check(
+                ioc_type=f.ioc_type or "", ioc_value=f.ioc_value or "",
+                source=(f.all_sources or ["unknown"])[0] if isinstance(f.all_sources, list) else "unknown",
+                enrichment_data=enrich, customer_context=cctx,
+            )
+            if ai_fp and ai_fp.get("is_fp") and ai_fp.get("confidence", 0) > 0.75:
+                f.ai_false_positive_flag = True
+                f.ai_false_positive_reason = ai_fp.get("reason", "")
+                stats["fp_flagged"] += 1
+
+            # 3. AI narrative
+            try:
+                ai_narr = await hook_investigation_narrative(
+                    ioc_type=f.ioc_type or "", ioc_value=f.ioc_value or "",
+                    source=(f.all_sources or ["unknown"])[0] if isinstance(f.all_sources, list) else "unknown",
+                    enrichment_data=enrich, customer_context=cctx,
+                )
+                if ai_narr and ai_narr.get("narrative"):
+                    f.ai_narrative = ai_narr["narrative"]
+                    stats["narratives"] += 1
+            except Exception:
+                pass
+        except Exception as e:
+            stats["errors"] += 1
+            stats["details"].append({"ioc": (f.ioc_value or "")[:40], "exception": str(e)[:100]})
+
+    await db.commit()
+    stats["remaining"] = await db.scalar(
+        select(func.count(Finding.id)).where(Finding.ai_provider == None,
+            Finding.status.notin_(["FALSE_POSITIVE", "VERIFIED_CLOSED"]))
+    ) or 0
+    stats["details"] = stats["details"][:10]  # Limit to 10 for readability
+    return stats
+
+
+@app.post("/api/pipeline-fixup", dependencies=[Depends(require_role("admin", "analyst"))])
+async def pipeline_fixup_endpoint(db: AsyncSession = Depends(get_db)):
+    """V16.4.5: Fix-up pipeline for existing findings.
+    
+    Backfills: match_proof, enrichment_narrative, remediations.
+    No AI API key required - uses rule-based logic only.
+    
+    Steps:
+    1. Promote matched detections without findings → create findings
+    2. Generate match_proof for findings without it
+    3. Generate enrichment_narrative from existing data
+    4. Generate remediations via action_generator
+    """
+    from arguswatch.engine.finding_manager import get_or_create_finding
+    from arguswatch.engine.action_generator import generate_action
+    from arguswatch.models import Finding, Detection, Customer, FindingRemediation
+    from sqlalchemy import select, and_
+    import json
+    
+    stats = {
+        "findings_promoted": 0,
+        "match_proof_set": 0,
+        "narratives_set": 0,
+        "remediations_created": 0,
+        "errors": 0,
+    }
+    
+    # Step 1: Promote matched-but-no-finding detections
+    orphan_r = await db.execute(
+        select(Detection).where(
+            and_(
+                Detection.customer_id.isnot(None),
+                Detection.finding_id.is_(None),
+            )
+        ).limit(500)
+    )
+    for det in orphan_r.scalars().all():
+        try:
+            f, is_new = await get_or_create_finding(det, db)
+            if is_new:
+                stats["findings_promoted"] += 1
+        except Exception as e:
+            stats["errors"] += 1
+    await db.flush()
+    
+    # Step 2+3: Backfill match_proof and enrichment_narrative
+    all_findings_r = await db.execute(select(Finding).limit(2000))
+    for finding in all_findings_r.scalars().all():
+        # match_proof
+        if not finding.match_proof or finding.match_proof == {} or finding.match_proof is None:
+            proof = {
+                "correlation_type": finding.correlation_type or "unknown",
+                "matched_asset": finding.matched_asset or "none",
+                "ioc_type": finding.ioc_type,
+                "ioc_value_preview": (finding.ioc_value or "")[:100],
+                "confidence": finding.confidence or 0,
+                "source_count": finding.source_count or 1,
+                "all_sources": list(finding.all_sources or []),
+            }
+            finding.match_proof = proof
+            stats["match_proof_set"] += 1
+        
+        # enrichment_narrative
+        if not finding.enrichment_narrative:
+            customer_name = ""
+            if finding.customer_id:
+                cr = await db.execute(select(Customer).where(Customer.id == finding.customer_id))
+                cust = cr.scalar_one_or_none()
+                customer_name = cust.name if cust else ""
+            
+            parts = []
+            parts.append(f"{finding.ioc_type} detection for {customer_name}.")
+            if finding.correlation_type:
+                parts.append(f"Matched via {finding.correlation_type} against asset '{finding.matched_asset or 'unknown'}'.")
+            if finding.source_count and finding.source_count > 1:
+                parts.append(f"Confirmed by {finding.source_count} independent sources ({', '.join(finding.all_sources or [])}).")
+            sev = finding.severity.value if hasattr(finding.severity, 'value') else str(finding.severity or 'MEDIUM')
+            parts.append(f"Severity: {sev}. Confidence: {finding.confidence or 0:.0%}.")
+            
+            finding.enrichment_narrative = " ".join(parts)
+            stats["narratives_set"] += 1
+    
+    await db.flush()
+    
+    # Step 4: Generate remediations
+    all_f_r = await db.execute(select(Finding.id).limit(2000))
+    for row in all_f_r.all():
+        try:
+            rem = await generate_action(row[0], db)
+            if rem:
+                stats["remediations_created"] += 1
+        except Exception as e:
+            stats["errors"] += 1
+    
+    await db.commit()
+    return stats
 
 
 @app.post("/api/customers/{cid}/tech-stack", dependencies=[Depends(require_role("admin", "analyst"))])
@@ -2561,10 +2819,52 @@ async def ai_query(req: AIQuery, db: AsyncSession = Depends(get_db)):
         stats["total_detections"] = r.scalar() or 0
         r = await db.execute(select(func.count(Detection.id)).where(Detection.severity == SeverityLevel.CRITICAL))
         stats["critical"] = r.scalar() or 0
-        r = await db.execute(select(func.count()).where(Detection.status == "NEW"))
-        stats["new_open"] = r.scalar() or 0
         r = await db.execute(select(func.count(Customer.id)).where(Customer.active == True))
         stats["active_customers"] = r.scalar() or 0
+    except Exception: pass
+
+    # Always load customer summary for general questions
+    customers_summary = ""
+    try:
+        cr = await db.execute(select(Customer.id, Customer.name, Customer.industry).where(Customer.active == True).limit(20))
+        custs = cr.all()
+        if custs:
+            lines = []
+            for c in custs:
+                # Count findings per customer
+                fr = await db.execute(select(func.count(Finding.id)).where(Finding.customer_id == c[0]))
+                fc = fr.scalar() or 0
+                lines.append(f"  - {c[1]} (ID:{c[0]}, industry:{c[2]}, findings:{fc})")
+            customers_summary = "CUSTOMERS:\n" + "\n".join(lines)
+    except Exception: pass
+
+    # Load top findings for context
+    findings_summary = ""
+    try:
+        fr = await db.execute(
+            select(Finding.ioc_value, Finding.ioc_type, Finding.severity, Finding.customer_id)
+            .order_by(Finding.severity.desc(), Finding.created_at.desc()).limit(15)
+        )
+        top_f = fr.all()
+        if top_f:
+            findings_summary = "TOP FINDINGS:\n" + "\n".join(
+                f"  - [{f[2]}] {f[1]}: {str(f[0])[:60]} (customer_id:{f[3]})" for f in top_f
+            )
+    except Exception: pass
+
+    # Load actors that have IOCs linked to customers
+    actors_summary = ""
+    try:
+        from arguswatch.models import ThreatActor
+        ar = await db.execute(
+            select(ThreatActor.name, ThreatActor.origin_country, ThreatActor.target_sectors, ThreatActor.sophistication)
+            .limit(20)
+        )
+        actors = ar.all()
+        if actors:
+            actors_summary = "THREAT ACTORS:\n" + "\n".join(
+                f"  - {a[0]} ({a[1] or '?'}, sophistication:{a[3] or '?'}, targets:{str(a[2])[:80]})" for a in actors
+            )
     except Exception: pass
 
     # Customer-specific context
@@ -2750,15 +3050,15 @@ CUSTOMER CONTEXT for {cust.name}:
 
     context = f"""You are ArgusWatch AI, a cybersecurity threat intelligence analyst for an MSSP platform.
 Platform stats: {stats}
+{customers_summary}
+{findings_summary}
+{actors_summary}
 {customer_context}
-You have access to customer detections, exposure scores (D1-D5), assets, and attribution strategies (S1-S8).
-
 INSTRUCTIONS:
-- Answer concisely and professionally. Reference specific detections and scores when available.
-- If asked about a customer and no customer_id was provided, ask which customer they mean.
-- When coverage gaps exist, PROACTIVELY RECOMMEND which assets to register and explain why (e.g. "Register your GitHub org to enable API key scanning - this would activate 22 additional IOC types").
-- When asked for a threat summary, provide: top risks by severity, exposure score interpretation, most concerning detection types, active threat actor targeting for this sector, and specific remediation priorities.
-- If the customer has no detections yet, explain what the system is monitoring and when they can expect results."""
+- Answer concisely using the data above. Reference specific customers, findings, and actors by name.
+- If asked about actors targeting customers, match actor target_sectors to customer industries.
+- If asked about a specific customer and no customer_id was provided, use the customer list above.
+- Keep answers under 300 words. Use bullet points for lists."""
 
     prompt = req.text
     
@@ -2781,25 +3081,34 @@ INSTRUCTIONS:
             import httpx
             history_text = "\n".join(f"{m['role'].title()}: {m['content']}" for m in conv_msgs)
             full_prompt = f"{context}\n\n{history_text}\nUser: {prompt}\nAssistant:" if history_text else f"{context}\n\nUser: {prompt}\nAssistant:"
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=120.0) as client:
                 resp = await client.post(f"{settings.OLLAMA_URL}/api/generate",
                     json={"model": settings.OLLAMA_MODEL, "prompt": full_prompt, "stream": False})
                 data = resp.json()
+                if "error" in data:
+                    return {"answer": f"Ollama error: {data['error']}", "model": "error", "provider": "ollama"}
                 return {"answer": data.get("response", "No response"), "model": settings.OLLAMA_MODEL, "provider": "ollama"}
+        except httpx.TimeoutException:
+            return {"answer": "Ollama is processing your query (qwen2.5:14b can take 30-90s for complex questions). Please try again — the model is warmed up now.", "model": "slow", "provider": "ollama"}
         except Exception as e:
-            return {"answer": f"Ollama+Qwen is starting up (may take 5-15 min on first boot to download model). Check: docker logs arguswatch-ollama. Error: {str(e)[:100]}", "model": "offline", "provider": "ollama"}
+            return {"answer": f"Ollama connection error: {str(e)[:150]}. Check: docker logs arguswatch-ollama", "model": "offline", "provider": "ollama"}
 
     elif provider == "anthropic" and settings.ANTHROPIC_API_KEY:
         try:
             import httpx
             messages = conv_msgs + [{"role": "user", "content": prompt}]
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 resp = await client.post("https://api.anthropic.com/v1/messages",
                     headers={"x-api-key": settings.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json"},
-                    json={"model": settings.ANTHROPIC_MODEL, "max_tokens": 1024,
+                    json={"model": settings.ANTHROPIC_MODEL, "max_tokens": 2048,
                           "system": context, "messages": messages})
                 data = resp.json()
-                return {"answer": data["content"][0]["text"], "model": settings.ANTHROPIC_MODEL, "provider": "anthropic"}
+                if "error" in data:
+                    return {"answer": f"Claude API error: {data['error'].get('message', data['error'])}", "model": "error", "provider": "anthropic"}
+                if "content" in data and len(data["content"]) > 0:
+                    text = data["content"][0].get("text", "")
+                    return {"answer": text, "model": settings.ANTHROPIC_MODEL, "provider": "anthropic"}
+                return {"answer": f"Claude returned empty response: {str(data)[:200]}", "model": "error", "provider": "anthropic"}
         except Exception as e:
             return {"answer": f"Claude API error: {e}", "model": "error"}
 
@@ -3267,7 +3576,7 @@ async def list_campaigns(
     """List attack campaigns."""
     from arguswatch.models import Campaign, Customer
     q = select(Campaign)
-    if status:
+    if status and status.strip():
         q = q.where(Campaign.status == status)
     if customer_id:
         q = q.where(Campaign.customer_id == customer_id)
@@ -3299,6 +3608,30 @@ async def list_campaigns(
         "last_activity": c.last_activity.isoformat() if c.last_activity else None,
         "ai_narrative": getattr(c, "ai_narrative", None),
     } for c in campaigns]
+
+
+@app.post("/api/campaigns/detect")
+async def detect_campaigns_now(db: AsyncSession = Depends(get_db)):
+    """Manually trigger campaign detection across all customers."""
+    try:
+        from arguswatch.engine.campaign_detector import check_and_create_campaign
+        from arguswatch.models import Finding
+        r = await db.execute(
+            select(Finding).where(Finding.campaign_id == None).limit(500)
+        )
+        findings = r.scalars().all()
+        created = 0
+        for f in findings:
+            try:
+                camp = await check_and_create_campaign(f, db)
+                if camp:
+                    created += 1
+            except Exception:
+                pass
+        await db.commit()
+        return {"status": "done", "findings_checked": len(findings), "campaigns_created": created}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)[:200]}
 
 
 @app.get("/api/campaigns/{campaign_id}")
@@ -3796,18 +4129,82 @@ async def update_remediation(action_id: int, status: str,
     await db.commit()
     return {"id": action.id, "status": action.status}
 
-@app.get("/api/remediations/stats")
+@app.get("/api/finding-remediations/stats")
 async def remediation_stats(db: AsyncSession = Depends(get_db)):
-    from arguswatch.models import RemediationAction
+    """Stats from FindingRemediation (real playbook-generated actions)."""
+    from arguswatch.models import FindingRemediation
     r = await db.execute(
-        select(RemediationAction.status, func.count(RemediationAction.id).label("cnt"))
-        .group_by(RemediationAction.status)
+        select(FindingRemediation.status, func.count(FindingRemediation.id).label("cnt"))
+        .group_by(FindingRemediation.status)
     )
     by_status = {row.status: row.cnt for row in r}
     total = sum(by_status.values())
     closed = by_status.get("completed", 0)
     return {"total": total, "by_status": by_status,
             "resolution_rate": round(closed / max(total, 1) * 100, 1)}
+
+@app.post("/api/finding-remediations/create", dependencies=[Depends(require_role("admin", "analyst"))])
+async def create_manual_remediation(request: Request, db: AsyncSession = Depends(get_db)):
+    """Create a manual remediation task (not linked to a specific finding)."""
+    from arguswatch.models import FindingRemediation
+    body = await request.json()
+    title = body.get("title", "").strip()
+    if not title:
+        raise HTTPException(422, "title is required")
+    rem = FindingRemediation(
+        finding_id=body.get("finding_id") or 0,
+        playbook_key="manual",
+        action_type=body.get("action_type", "manual"),
+        title=title,
+        steps_technical=[body.get("description", "")] if body.get("description") else [],
+        assigned_role=body.get("assigned_role", "analyst"),
+        status=body.get("status", "pending"),
+        sla_hours=body.get("sla_hours", 72),
+    )
+    db.add(rem)
+    await db.flush()
+    await db.refresh(rem)
+    await db.commit()
+    return {"id": rem.id, "title": rem.title, "status": rem.status}
+
+@app.get("/api/finding-remediations/")
+async def list_all_remediations(status: Optional[str] = None, db: AsyncSession = Depends(get_db)):
+    """List ALL FindingRemediation actions across all findings/customers."""
+    from arguswatch.models import FindingRemediation, Finding, Customer
+    q = select(FindingRemediation).order_by(desc(FindingRemediation.created_at)).limit(200)
+    if status and status != "all":
+        q = q.where(FindingRemediation.status == status)
+    r = await db.execute(q)
+    items = []
+    for rem in r.scalars().all():
+        fr = await db.execute(select(Finding).where(Finding.id == rem.finding_id))
+        f = fr.scalar_one_or_none()
+        cust_name = None
+        if f and f.customer_id:
+            cr = await db.execute(select(Customer.name).where(Customer.id == f.customer_id))
+            cust_name = cr.scalar_one_or_none()
+        items.append({
+            "id": rem.id,
+            "finding_id": rem.finding_id,
+            "playbook_key": rem.playbook_key,
+            "action_type": rem.action_type,
+            "title": rem.title,
+            "status": rem.status or "pending",
+            "assigned_to": rem.assigned_to,
+            "assigned_role": rem.assigned_role,
+            "deadline": rem.deadline.isoformat() if rem.deadline else None,
+            "sla_hours": rem.sla_hours,
+            "steps_technical": rem.steps_technical or [],
+            "steps_governance": rem.steps_governance or [],
+            "evidence_required": rem.evidence_required or [],
+            "created_at": rem.created_at.isoformat() if rem.created_at else None,
+            "completed_at": rem.completed_at.isoformat() if getattr(rem, 'completed_at', None) else None,
+            "ioc_value": f.ioc_value if f else None,
+            "ioc_type": f.ioc_type if f else None,
+            "severity": f.severity.value if f and hasattr(f.severity, 'value') else str(f.severity) if f and f.severity else None,
+            "customer_name": cust_name,
+        })
+    return {"items": items, "total": len(items)}
 
 # ══════════════════════════════════════════════════════
 # SLA / ESCALATION
