@@ -596,18 +596,7 @@ docker exec arguswatch-backend python -m pytest tests/ -v
 
 ---
 
-## 📜 Patents
-
-| Patent | Filing | Status |
-|--------|--------|--------|
-| VulnPilot AI (Triple-Lock Safety) | US 63/983,055 | Filed |
-| Ghost Risks Detection | US 63/983,059 | Filed |
-| VCTS Scenario Engine | US 63/983,697 | Filed |
-| IAMPilot (Identity Threat Assessment) | US 63/987,743 | Filed |
-
----
-
-## Patents Filed
+## Pending-Patents
 
 | Application | Title |
 |------------|-------|
@@ -628,7 +617,9 @@ Proprietary - Solvent CyberSecurity LLC. All rights reserved.
 <div align="center">
 
 <img src="backend/arguswatch/static/solvent-icon.svg" alt="Solvent" width="24" height="24">
+
  *ArgusWatch: See Everything. Miss Nothing.*
+ 
  <br>
 
 **Cyber AI Architecture**
