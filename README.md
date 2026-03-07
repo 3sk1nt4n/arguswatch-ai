@@ -39,7 +39,7 @@ ArgusWatch is a production-grade, multi-tenant AI-Agentic threat intelligence pl
 
 ### Why "AI-Agentic"?
 
-The core of ArgusWatch is an **autonomous AI orchestrator** that investigates threats the way a human SOC analyst would — but faster:
+The core of ArgusWatch is an **autonomous AI orchestrator** that investigates threats the way a human SOC analyst would - but faster:
 
 ```
 Detection arrives: "CVE-2026-3404 found in Uber's tech stack"
@@ -204,14 +204,14 @@ curl -X POST http://localhost:7777/api/ai-triage?limit=1
 
 | # | Service | Container | Port | What it does |
 |---|---------|-----------|------|-------------|
-| 1 | **backend** | arguswatch-backend | 8000 | FastAPI app — matching, correlation, AI pipeline, API |
+| 1 | **backend** | arguswatch-backend | 8000 | FastAPI app - matching, correlation, AI pipeline, API |
 | 2 | **intel-proxy** | arguswatch-intel-proxy | 9999 | 47 collectors, pattern matcher, grep.app, crt.sh |
 | 3 | **postgres** | arguswatch-postgres | 5432 | PostgreSQL 16 + Row Level Security (multi-tenant) |
 | 4 | **redis** | arguswatch-redis | 6379 | Celery broker, AI provider state, caching |
 | 5 | **ollama** | arguswatch-ollama | 11434 | Qwen 2.5 14B — local AI (auto-pulls on first boot) |
 | 6 | **recon-engine** | arguswatch-recon | 8888 | Subdomain enumeration, DNS, certificate scanning |
-| 7 | **celery_worker** | arguswatch-celery-worker | — | Background pipeline processing |
-| 8 | **celery_beat** | arguswatch-celery-beat | — | Scheduled collection every 30-60 min |
+| 7 | **celery_worker** | arguswatch-celery-worker | - | Background pipeline processing |
+| 8 | **celery_beat** | arguswatch-celery-beat | - | Scheduled collection every 30-60 min |
 | 9 | **nginx** | aw-nginx | **7777** | Reverse proxy, serves dashboard to browser |
 | 10 | **prometheus** | arguswatch-prometheus | 9090 | Metrics collection + health monitoring |
 
@@ -542,11 +542,11 @@ docker exec arguswatch-backend python -m pytest tests/ -q
 
 ```yaml
 # docker-compose.yml environment:
-ANTHROPIC_API_KEY: sk-ant-...     # Optional — Claude
-OPENAI_API_KEY: sk-...            # Optional — GPT-4o
-GOOGLE_AI_KEY: AIza...            # Optional — Gemini
-VIRUSTOTAL_API_KEY: ...           # Recommended — free 500/day
-ABUSEIPDB_API_KEY: ...            # Recommended — free 1000/day
+ANTHROPIC_API_KEY: sk-ant-...     # Optional - Claude
+OPENAI_API_KEY: sk-...            # Optional - GPT-4o
+GOOGLE_AI_KEY: AIza...            # Optional - Gemini
+VIRUSTOTAL_API_KEY: ...           # Recommended - free 500/day
+ABUSEIPDB_API_KEY: ...            # Recommended - free 1000/day
 OLLAMA_MODEL: qwen2.5:14b        # Default AI (auto-pulled)
 AUTH_DISABLED: true               # No login (default)
 ```
