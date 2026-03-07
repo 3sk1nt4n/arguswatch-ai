@@ -2,6 +2,7 @@
 
 
 <img src="backend/arguswatch/static/solvent-icon.svg" alt="Solvent CyberSecurity" width="48" height="48">
+
 # ArgusWatch AI-Agentic Threat Intelligence Platform
 
 ### v16.4.6 — Multi-Tenant MSSP Platform | 47 Collectors | 86 IOC Types | 110 Tests
