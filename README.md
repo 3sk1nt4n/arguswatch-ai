@@ -14,7 +14,7 @@
 [![Tests](https://img.shields.io/badge/tests-110_passing-brightgreen.svg)]()
 [![Patents](https://img.shields.io/badge/patents-4_USPTO_filed-purple.svg)]()
 
-**[Solvent CyberSecurity LLC](https://solventcyber.com) | Created by Adil Eskintan ([@3sk1nt4n](https://github.com/3sk1nt4n))**
+
 
 *Zero fake data. Real threat intelligence. Every finding has a provable evidence trail.*
 
@@ -29,6 +29,13 @@
 ## What is ArgusWatch?
 
 ArgusWatch is a production-grade, multi-tenant AI-Agentic threat intelligence platform for MSSPs. It collects IOCs from 47 real threat feeds, correlates them against customer assets using 8 matching strategies, and presents every finding with a provable evidence trail. All AI runs locally on Qwen 2.5 14B via Ollama (free, private), with one-click switching to Claude, GPT-4o, or Gemini from the dashboard header.
+
+<img width="1343" height="964" alt="1" src="https://github.com/user-attachments/assets/c4ae1c23-8579-4c71-9813-f6789f7dfb95" />
+<img width="1343" height="964" alt="Threat Universe" src="https://github.com/user-attachments/assets/18925e0d-ddf0-42cf-8da8-47180a8e697c" />
+<img width="1005" height="963" alt="2" src="https://github.com/user-attachments/assets/aecd0f62-8a39-4056-b716-7c8448220af0" />
+<img width="1343" height="964" alt="3" src="https://github.com/user-attachments/assets/5c4126c6-a14b-4382-b885-847cf984704a" />
+
+
 
 ### Why "AI-Agentic"?
 
@@ -600,10 +607,51 @@ docker exec arguswatch-backend python -m pytest tests/ -v
 
 ---
 
+## Patents Filed
+
+| Application | Title |
+|------------|-------|
+| US 63/983,055 | VulnPilot - AI vulnerability prioritization |
+| US 63/983,059 | Ghost Risks - undetected threat identification |
+| US 63/983,697 | VCTS - vulnerability scenario engine |
+| US 63/987,743 | IAMPilot - governance-modulated identity threat assessment |
+
+---
+
+## License
+
+Proprietary - Solvent CyberSecurity LLC. All rights reserved.
+
+---
+
+
 <div align="center">
 
 <img src="backend/arguswatch/static/solvent-icon.svg" alt="Solvent" width="24" height="24">
+ *ArgusWatch: See Everything. Miss Nothing.*
+ <br>
 
-**[Solvent CyberSecurity LLC](https://solventcyber.com)** — *ArgusWatch: See Everything. Miss Nothing.*
+**Cyber AI Architecture**
+
+Built by [**3sk1nt4n**](https://www.credly.com/users/eskintan/badges)
+
+[Solvent CyberSecurity LLC](https://solventcyber.com) - *Defending what matters. One command at a time.*
+
+<br>
 
 </div>
+
+<div align="center">
+
+
+
+![Python](https://img.shields.io/badge/Built_With-Python-3776AB?style=flat-square&logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/API-FastAPI-009688?style=flat-square&logo=fastapi&logoColor=white)
+![Docker](https://img.shields.io/badge/Deploy-Docker-2496ED?style=flat-square&logo=docker&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/DB-PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white)
+![Redis](https://img.shields.io/badge/Cache-Redis-DC382D?style=flat-square&logo=redis&logoColor=white)
+![Three.js](https://img.shields.io/badge/3D-Three.js-000000?style=flat-square&logo=three.js&logoColor=white)
+
+</div>
+
+
