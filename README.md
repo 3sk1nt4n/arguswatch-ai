@@ -497,7 +497,7 @@ arguswatch-v16.4.7/
 
 | # | Model | Type | Size | Speed | GPQA | SWE-bench | Context | Tools | Cost (in/out) |
 |---|-------|------|------|-------|------|-----------|---------|-------|---------------|
-| 🥇 | **Qwen 3 8B** | 🟢 LOCAL | 6.6 GB | 40-60 t/s | 81.7 | -  | 256K | ✅ RL-trained | **FREE** |
+| 🥇 | **Qwen 3 9B** | 🟢 LOCAL | 6.6 GB | 40-60 t/s | 81.7 | -  | 256K | ✅ RL-trained | **FREE** |
 | 🥈 | **Gemini 3.1 Pro** | 🟣 CLOUD | Proprietary | 50-70 t/s | **94.3** 🏆 | 80.6% | 1M | ✅ Native+MCP | $2 / $12 |
 | 🥉 | **Claude Opus 4.6** | 🟣 CLOUD | Proprietary | 25-35 t/s | 91.3 | **80.8%** | 1M | ✅ Native | $5 / $25 |
 | 4 | **GPT-5.3 Codex** | 🟣 CLOUD | Proprietary | 40-60 t/s | 81.0 | 56.8% Pro | 400K | ✅ Native | $1.75 / $14 |
