@@ -4,7 +4,7 @@ from functools import lru_cache
 class Settings(BaseSettings):
     # Database
     POSTGRES_USER: str = "arguswatch"
-    POSTGRES_PASSWORD: str  # Required -  set in .env
+    POSTGRES_PASSWORD: str = "arguswatch"  # Default for local/dev/tests; override in .env for real deployments
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
     POSTGRES_DB: str = "arguswatch"
