@@ -403,7 +403,7 @@ class FindingRemediation(Base):
     """
     __tablename__ = "finding_remediations"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
-    finding_id = Column(BigInteger, ForeignKey("findings.id"), nullable=False)
+    finding_id = Column(BigInteger, ForeignKey("findings.id"), nullable=True)
     playbook_key = Column(String(100))
     action_type = Column(String(50), nullable=False)
     title = Column(String(500))

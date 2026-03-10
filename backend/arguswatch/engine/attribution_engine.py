@@ -207,10 +207,11 @@ async def attribute_finding(finding: Finding, db: AsyncSession) -> list[str]:
                             finding.actor_id = _actor_auto.id
                             finding.actor_name = _actor_auto.name
                             finding.ai_attribution_reasoning = _ai_pick.get("narrative", "")
+                            old_attributed = list(attributed)[:3]
                             attributed = {_auto_name}
                             logger.info(
                                 f"[attribution] autonomous override: {_auto_name} "
-                                f"conf={_ai_pick.get('confidence','?')} (was: {list(attributed)[:3]})"
+                                f"conf={_ai_pick.get('confidence','?')} (was: {old_attributed})"
                             )
         except Exception as _auto_e:
             logger.debug(f"[attribution] autonomous AI override failed (non-fatal): {_auto_e}")
