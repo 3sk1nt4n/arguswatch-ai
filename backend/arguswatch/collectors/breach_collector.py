@@ -87,7 +87,7 @@ async def run_collection() -> dict:
                 if asset.asset_type == "domain" and hibp_key:
                     stats["domains_checked"] += 1
                     breaches = await check_hibp_domain(val, hibp_key, client)
-                    if breaches and not isinstance(breaches[0], dict) or (breaches and "error" not in str(breaches[0])):
+                    if breaches and (isinstance(breaches, dict) or (isinstance(breaches, list) and isinstance(breaches[0], dict) and "error" not in str(breaches[0]))):
                         for acct, breach_names in (breaches.items() if isinstance(breaches, dict) else []):
                             ioc_val = f"{acct}@{val}"
                             r3 = await db.execute(select(Detection).where(

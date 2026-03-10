@@ -99,8 +99,16 @@ async def recon_dns(subdomains):
 
     # Use dnsx if available for bulk resolution
     if subdomains:
-        input_str = "\n".join(subdomains[:200])
-        lines = run_cmd(f"echo '{input_str}' | dnsx -silent -a -resp 2>/dev/null", timeout=30)
+        sanitized = [s for s in subdomains[:200] if all(c.isalnum() or c in ".-_" for c in s)]
+        input_str = "\n".join(sanitized)
+        try:
+            proc = subprocess.run(
+                ["dnsx", "-silent", "-a", "-resp"],
+                input=input_str, capture_output=True, text=True, timeout=30
+            )
+            lines = [l.strip() for l in proc.stdout.strip().split("\n") if l.strip()]
+        except Exception:
+            lines = []
         for l in lines:
             parts = l.split()
             if len(parts) >= 2:
@@ -124,7 +132,11 @@ async def recon_dns(subdomains):
 
     # MX records for main domain
     if subdomains:
-        domain = subdomains[0].split(".")[-2] + "." + subdomains[0].split(".")[-1]
+        # Extract base domain - handle multi-part TLDs (e.g. co.uk)
+        parts = subdomains[0].split(".")
+        domain = ".".join(parts[-2:]) if len(parts) >= 2 else subdomains[0]
+        if len(parts) >= 3 and parts[-2] in ("co", "com", "org", "net", "gov", "ac", "edu"):
+            domain = ".".join(parts[-3:])
         try:
             async with httpx.AsyncClient(timeout=5) as c:
                 for qtype in ["MX", "NS", "TXT"]:
@@ -420,7 +432,7 @@ async def full_recon(customer_id: int, domain: str):
     async with ASession() as db:
         await db.execute(text("""
             UPDATE customers SET onboarding_state='assets_added', onboarding_updated_at=NOW()
-            WHERE id=:cid AND onboarding_state IN ('created', NULL)
+            WHERE id=:cid AND (onboarding_state = 'created' OR onboarding_state IS NULL)
         """), {"cid": customer_id})
         await db.commit()
 

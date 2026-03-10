@@ -849,7 +849,7 @@ async def collect_paste():
     except Exception as e:
         log.warning(f"Paste failed: {e}")
         async with AsyncSessionLocal() as db:
-            await insert_collector_run(db, "paste", "completed", stats, started, datetime.utcnow(), str(e))
+            await insert_collector_run(db, "paste", "failed", stats, started, datetime.utcnow(), str(e))
             await db.commit()
         stats["error"] = str(e)
     log.info(f"Paste: {stats['new']} new / {stats['total']} pastes / {stats['pastes_scanned']} scanned / {stats['iocs_found']} IOCs")

@@ -73,6 +73,7 @@ async def run_collection() -> dict:
                 except Exception as e:
                     logger.warning(f"Telegram channel {channel} error: {e}")
             await db.commit()
+            await trigger_pipeline_for_new(db)
         await client.disconnect()
     except Exception as e:
         logger.error(f"Telegram collector error: {e}")

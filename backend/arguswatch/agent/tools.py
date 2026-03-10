@@ -524,7 +524,7 @@ TOOL_SCHEMAS = [
                     "query": {"type": "string", "description": "Search term for IOC value or raw text"},
                     "customer_name": {"type": "string", "description": "Filter by customer name (partial match)"},
                     "severity": {"type": "string", "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW"], "description": "Filter by severity"},
-                    "status": {"type": "string", "enum": ["NEW", "REVIEWING", "REMEDIATED", "FALSE_POSITIVE", "VERIFIED_CLOSED"], "description": "Filter by status"},
+                    "status": {"type": "string", "enum": ["NEW", "ENRICHED", "ALERTED", "REMEDIATED", "FALSE_POSITIVE", "VERIFIED_CLOSED", "ESCALATION", "CLOSED"], "description": "Filter by status"},
                     "limit": {"type": "integer", "description": "Max results to return (default 20, max 100)"},
                 },
                 "required": [],
@@ -583,7 +583,7 @@ TOOL_SCHEMAS = [
                 "type": "object",
                 "properties": {
                     "detection_id": {"type": "integer", "description": "Detection ID to update"},
-                    "new_status": {"type": "string", "enum": ["REVIEWING", "REMEDIATED", "FALSE_POSITIVE"], "description": "New status"},
+                    "new_status": {"type": "string", "enum": ["ENRICHED", "ALERTED", "REMEDIATED", "FALSE_POSITIVE", "ESCALATION", "CLOSED"], "description": "New status"},
                     "notes": {"type": "string", "description": "Optional analyst notes"},
                     "assignee": {"type": "string", "description": "Optional assignee name"},
                 },

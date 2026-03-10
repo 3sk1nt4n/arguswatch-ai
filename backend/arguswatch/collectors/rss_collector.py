@@ -60,6 +60,7 @@ async def run_collection() -> dict:
                 ))
                 stats["new"] += 1
         await db.commit()
+        await trigger_pipeline_for_new(db)
     return stats
 
 @celery_app.task(name="arguswatch.collectors.rss_collector.collect_rss")
