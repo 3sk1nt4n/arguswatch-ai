@@ -13,7 +13,6 @@
 [![IOC Types](https://img.shields.io/badge/IOC_types-111-brightgreen.svg)]()
 [![Patents](https://img.shields.io/badge/patents-4_USPTO_filed-purple.svg)]()
 
-**[Solvent CyberSecurity LLC](https://solventcyber.com) | Created by Adil Eskintan ([@3sk1nt4n](https://github.com/3sk1nt4n))**
 
 *Zero fake data. Real threat intelligence. Every finding has a provable evidence trail.*
 
