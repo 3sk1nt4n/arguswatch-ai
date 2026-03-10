@@ -139,14 +139,14 @@ async def _update_db_gauges():
             set_gauge("arguswatch_detections_total", float(r.scalar() or 0))
 
             r = await db.execute(text(
-                "SELECT COUNT(*) FROM findings WHERE status = 'open'"))
+                "SELECT COUNT(*) FROM findings WHERE status IN ('NEW', 'ENRICHED', 'ALERTED', 'ESCALATION')"))
             set_gauge("arguswatch_findings_open", float(r.scalar() or 0))
 
             r = await db.execute(text("SELECT COUNT(*) FROM customers"))
             set_gauge("arguswatch_customers_total", float(r.scalar() or 0))
 
             r = await db.execute(text(
-                "SELECT source, MAX(started_at) FROM collector_runs GROUP BY source"))
+                "SELECT collector_name, MAX(started_at) FROM collector_runs GROUP BY collector_name"))
             for row in r.fetchall():
                 set_gauge("arguswatch_collectors_last_run",
                           row[1].timestamp() if row[1] else 0,

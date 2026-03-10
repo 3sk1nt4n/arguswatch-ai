@@ -1,4 +1,7 @@
 """ArgusWatch AI-Agentic Threat Intelligence V16.4.1 - FastAPI backend."""
+import hashlib
+import json
+import logging
 import os
 import re
 import socket
@@ -29,6 +32,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from arguswatch.metrics import setup_metrics
+
+logger = logging.getLogger("arguswatch.main")
 
 STATIC = Path(__file__).parent / "static"
 
@@ -289,8 +294,8 @@ async def lifespan(app: FastAPI):
             prov = _provider()
             available = _pipeline_ai_available()
             print(f"  AI Engine:   {prov.upper()} {'✅ ACTIVE' if available else '❌ NOT AVAILABLE'}")
+            from arguswatch.config import settings as _s
             if prov == "ollama":
-                from arguswatch.config import settings as _s
                 print(f"  AI Model:    {_s.OLLAMA_MODEL}")
                 print(f"  Ollama URL:  {_s.OLLAMA_URL}")
             print(f"  Autonomous:  {getattr(_s, 'AI_AUTONOMOUS', False)}")
@@ -3814,7 +3819,7 @@ class AgentQuery(BaseModel):
 @app.post("/api/agent/query", dependencies=[Depends(require_role("admin", "analyst"))])
 async def agent_query(req: AgentQuery):
     from arguswatch.agent.agent_core import run_agent
-    result = await run_agent(req.text, req.provider, req.conversation_history)
+    result = await run_agent(req.question, req.provider, req.conversation_history)
     return result
 
 @app.get("/api/settings/ai")
