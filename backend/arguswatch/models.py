@@ -51,6 +51,7 @@ class Customer(Base):
     tier = Column(String(20), default="standard")
     primary_contact = Column(String(255))
     email = Column(String(255))
+    primary_domain = Column(String(255), nullable=True)  # Legacy field kept for compatibility
     slack_channel = Column(String(100))
     active = Column(Boolean, default=True)
     # V13: Onboarding state machine - 5 states
@@ -119,6 +120,11 @@ class CustomerExposure(Base):
     factor_breakdown = Column(JSON, default=dict)  # V10: {sector_match, cve_score, darkweb_score, etc.}
     recency_multiplier = Column(Float, default=1.0)  # V10: 1.5 for 24h, 1.2 for 7d, 1.0 otherwise
     score_narrative = Column(Text, nullable=True)      # V16.4: AI-generated executive narrative explaining score drivers
+    d1_actor_threat = Column(Float, default=0.0)
+    d2_target_value = Column(Float, default=0.0)
+    d3_sector_risk = Column(Float, default=0.0)
+    d4_darkweb_presence = Column(Float, default=0.0)
+    d5_surface_exposure = Column(Float, default=0.0)
     customer = relationship("Customer", back_populates="exposures")
     actor = relationship("ThreatActor", back_populates="exposures")
 
@@ -155,7 +161,7 @@ class Detection(Base):
     )
 
 class DarkWebMention(Base):
-    __tablename__ = "darkweb_mentions"
+    __tablename__ = "dark_web_mentions"
     id = Column(BigInteger, primary_key=True, autoincrement=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
     source = Column(String(100), nullable=False)
@@ -258,8 +264,10 @@ class Finding(Base):
     ioc_type = Column(String(50), nullable=False)
     # Customer routing
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
+    detection_id = Column(BigInteger, ForeignKey("detections.id"), nullable=True)  # Legacy single-source link
     matched_asset = Column(String(500))
     correlation_type = Column(String(50))
+    match_strategy = Column(String(50), nullable=True)  # Legacy naming kept for compatibility
     # Severity + status (upgraded as sources accumulate)
     severity = Column(SAEnum(SeverityLevel), default=SeverityLevel.MEDIUM)
     status = Column(SAEnum(DetectionStatus), default=DetectionStatus.NEW)
@@ -351,6 +359,7 @@ class Campaign(Base):
     severity = Column(SAEnum(SeverityLevel), default=SeverityLevel.HIGH)
     status = Column(String(30), default="active")   # active | contained | closed
     ai_narrative = Column(Text, nullable=True)       # Campaign-level: kill chain narrative (distinct from Finding.ai_narrative)
+    narrative = Column(Text, nullable=True)            # Legacy field name kept for tests/compatibility
     first_seen = Column(DateTime, default=lambda: datetime.utcnow())
     last_activity = Column(DateTime, default=lambda: datetime.utcnow())
     created_at = Column(DateTime, default=lambda: datetime.utcnow())
@@ -363,6 +372,20 @@ class Campaign(Base):
         Index("ix_campaign_status", "status"),
     )
 
+
+
+
+class CampaignFinding(Base):
+    """Legacy join table retained for compatibility with older code/tests."""
+    __tablename__ = "campaign_findings"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    campaign_id = Column(Integer, ForeignKey("campaigns.id", ondelete="CASCADE"), nullable=False)
+    finding_id = Column(BigInteger, ForeignKey("findings.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+    __table_args__ = (
+        Index("ix_campaign_findings_campaign", "campaign_id"),
+        Index("ix_campaign_findings_finding", "finding_id"),
+    )
 
 class ActorIoc(Base):
     """DB-driven actor -> IOC attribution map.
@@ -548,6 +571,8 @@ class FPPattern(Base):
     reason = Column(Text, nullable=True)                  # analyst reason or AI inference
     confidence = Column(Float, default=0.9)               # how confident this pattern is FP
     hit_count = Column(Integer, default=1)                # how many times this pattern matched
+    auto_close_count = Column(Integer, default=0)
+    pattern_hash = Column(String(64), nullable=True)
     last_hit_at = Column(DateTime, nullable=True)
     created_by = Column(String(100), default="analyst")   # analyst | ai_auto | system
     created_at = Column(DateTime, default=lambda: datetime.utcnow())
@@ -613,3 +638,63 @@ class EdrTelemetry(Base):
     __table_args__ = (
         Index("ix_edr_customer", "customer_id"),
     )
+
+
+# Legacy class alias for backward compatibility
+ActorIOC = ActorIoc
+
+
+# Legacy table models retained for compatibility with older tests/code paths
+class AIAnalysisLog(Base):
+    __tablename__ = "ai_analysis_log"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    finding_id = Column(BigInteger, ForeignKey("findings.id"), nullable=True)
+    provider = Column(String(50), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+
+
+class AgentToolLog(Base):
+    __tablename__ = "agent_tool_log"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    tool_name = Column(String(100), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+
+
+class AIProviderState(Base):
+    __tablename__ = "ai_provider_state"
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    provider = Column(String(50), nullable=False)
+    is_available = Column(Boolean, default=True)
+    updated_at = Column(DateTime, default=lambda: datetime.utcnow())
+
+
+class EscalationLog(Base):
+    __tablename__ = "escalation_log"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    detection_id = Column(BigInteger, ForeignKey("detections.id"), nullable=True)
+    reason = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+
+
+class SLATracking(Base):
+    __tablename__ = "sla_tracking"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    detection_id = Column(BigInteger, ForeignKey("detections.id"), nullable=True)
+    due_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+
+
+class ExposureSnapshot(Base):
+    __tablename__ = "exposure_snapshots"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    customer_id = Column(Integer, ForeignKey("customers.id"), nullable=False)
+    score = Column(Float, default=0.0)
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
+
+
+class IngestLog(Base):
+    __tablename__ = "ingest_log"
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    source = Column(String(100), nullable=False)
+    status = Column(String(20), default="ok")
+    created_at = Column(DateTime, default=lambda: datetime.utcnow())
