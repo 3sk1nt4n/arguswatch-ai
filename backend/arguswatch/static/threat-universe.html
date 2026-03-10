@@ -214,7 +214,7 @@ const nodeGroup=new THREE.Group(),edgeGroup=new THREE.Group(),pulseGroup=new THR
 scene.add(nodeGroup);scene.add(edgeGroup);scene.add(pulseGroup);
 
 function clearScene(){
-  [nodeGroup,edgeGroup,pulseGroup].forEach(g=>{while(g.children.length){g.children[0].geometry?.dispose();g.remove(g.children[0]);}});
+  [nodeGroup,edgeGroup,pulseGroup].forEach(g=>{while(g.children.length){g.children[0].geometry?.dispose();g.children[0].material?.dispose();g.remove(g.children[0]);}});
   nodes=[];edges=[];nodeMap={};}
 
 function addNode(type,label,meta){
@@ -236,7 +236,7 @@ function addNode(type,label,meta){
     ring=new THREE.Mesh(rg,rm);ring.position.copy(mesh.position);nodeGroup.add(ring);}
   nodeGroup.add(mesh);nodeGroup.add(glow);
   const idx=nodes.length;
-  nodes.push({mesh,glow,ring,type,label,meta:meta||{},idx});
+  nodes.push({mesh,glow,ring,type,label,meta:meta||{},idx,baseY:y});
   mesh.userData={idx,type,label,meta:meta||{}};
   return idx;}
 
@@ -252,7 +252,7 @@ function addEdge(a,b){
   const pulse=new THREE.Mesh(pg,pm);pulse.position.copy(pa);pulseGroup.add(pulse);
   edges.push({line,a,b,pulse,t:Math.random(),speed:.002+Math.random()*.004});}
 
-async function api(path){try{const r=await fetch(API+path,{signal:AbortSignal.timeout(8000)});if(!r.ok)return null;return await r.json();}catch{return null;}}
+async function api(path){try{const r=await fetch(API+path,{signal:AbortSignal.timeout(8000)});if(!r.ok){console.warn('[threat-universe] API error',path,r.status);return null;}return await r.json();}catch(e){console.warn('[threat-universe] API fetch failed',path,e.message);return null;}}
 
 // No demo/seed data  -  platform shows only real collected intelligence
 
@@ -268,7 +268,7 @@ async function loadData(filterCust){
     return;
   } else {
     const sel=document.getElementById('customer-filter');
-    if(sel.options.length<2)custs.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.name;sel.appendChild(o);});
+    while(sel.options.length>1)sel.remove(1);custs.forEach(c=>{const o=document.createElement('option');o.value=c.id;o.textContent=c.name;sel.appendChild(o);});
     sel.value=filterCust;
     const target=filterCust==='all'?custs:custs.filter(c=>String(c.id)===String(filterCust));
     if(target.length){
@@ -407,7 +407,7 @@ function handleHover(e){
 let time=0;
 function animate(){requestAnimationFrame(animate);time+=.01;
   nodes.forEach((n,i)=>{
-    n.mesh.position.y+=Math.sin(time*.8+i*.7)*.15;
+    n.mesh.position.y=n.baseY+Math.sin(time*.8+i*.7)*1.5;
     n.glow.position.copy(n.mesh.position);
     n.glow.scale.setScalar(1+Math.sin(time*1.5+i)*.08);
     if(n.ring){n.ring.position.copy(n.mesh.position);n.ring.rotation.x=Math.sin(time*.3+i)*.3+Math.PI/3;n.ring.rotation.z=time*.15+i;}});
