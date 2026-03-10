@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Top 10 LLMs for ArgusWatch -  Local + Cloud Flagships -  March 2026</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;700;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f8f7f4;--card:#fff;--text:#1a1a1a;--text2:#555;--text3:#888;--orange:#e65c00;--green:#00897b;--red:#c62828;--cyan:#0097a7;--navy:#1b2a4a;--gold:#d4a017;--purple:#7b1fa2;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);line-height:1.6;}
+.hdr{background:linear-gradient(135deg,var(--navy),#0d2137);padding:32px 24px;text-align:center;position:relative;}
+.hdr h1{font-size:24px;font-weight:900;color:#fff;}
+.hdr .sub{font-size:12px;color:rgba(255,255,255,.4);margin-top:4px;font-family:'JetBrains Mono',monospace;}
+.hdr .hw{display:inline-flex;gap:10px;margin-top:10px;flex-wrap:wrap;justify-content:center;}
+.hdr .hw span{padding:3px 10px;border-radius:6px;background:rgba(255,255,255,.06);font-size:10px;font-weight:600;color:rgba(255,255,255,.5);font-family:'JetBrains Mono',monospace;}
+.c{max-width:1320px;margin:0 auto;padding:20px 12px;}
+.note{background:rgba(230,92,0,.04);border-left:3px solid var(--orange);padding:10px 14px;border-radius:0 8px 8px 0;margin:14px 0;font-size:12px;color:var(--text2);}
+.note.p{border-left-color:var(--purple);background:rgba(123,31,162,.03);}
+.leg{display:flex;gap:14px;flex-wrap:wrap;margin:10px 0;font-size:10px;color:var(--text3);}
+.leg span{display:inline-flex;align-items:center;gap:3px;}
+.d{width:9px;height:9px;border-radius:2px;display:inline-block;}
+.d.l{background:var(--green);}.d.cl{background:var(--purple);}
+.tw{overflow-x:auto;border-radius:12px;border:1px solid rgba(0,0,0,.05);background:var(--card);}
+table{width:100%;border-collapse:collapse;min-width:1240px;}
+thead th{background:var(--navy);color:#fff;font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.7px;padding:10px 7px;text-align:left;white-space:nowrap;}
+thead th:first-child{border-radius:10px 0 0 0;}thead th:last-child{border-radius:0 10px 0 0;}
+tbody td{padding:8px 7px;font-size:11.5px;border-bottom:1px solid rgba(0,0,0,.03);vertical-align:middle;}
+tbody tr:hover{background:rgba(230,92,0,.01);}
+tr.pk{background:rgba(0,137,123,.04);border-left:3px solid var(--green);}
+tr.cl{background:rgba(123,31,162,.02);border-left:3px solid var(--purple);}
+.rk{width:24px;height:24px;border-radius:50%;display:inline-flex;align-items:center;justify-content:center;font-weight:900;font-size:11px;font-family:'JetBrains Mono',monospace;}
+.rk.g{background:rgba(212,160,23,.12);color:var(--gold);}
+.rk.s{background:rgba(0,0,0,.04);color:#666;}
+.rk.b{background:rgba(180,100,40,.08);color:#b46428;}
+.rk.n{background:rgba(0,0,0,.03);color:var(--text3);}
+.t{display:inline-block;padding:1px 5px;border-radius:3px;font-size:8px;font-weight:700;font-family:'JetBrains Mono',monospace;margin-left:2px;vertical-align:middle;}
+.t.moe{background:rgba(230,92,0,.08);color:var(--orange);}
+.t.hy{background:rgba(0,151,167,.08);color:var(--cyan);}
+.t.vi{background:rgba(123,31,162,.08);color:#7b1fa2;}
+.t.to{background:rgba(33,150,243,.08);color:#1976d2;}
+.t.pk{background:rgba(0,137,123,.15);color:var(--green);font-weight:800;font-size:9px;}
+.t.ct{background:rgba(123,31,162,.1);color:var(--purple);}
+.t.fr{background:rgba(0,137,123,.08);color:var(--green);}
+.t.bv{background:rgba(212,160,23,.12);color:var(--gold);font-size:9px;font-weight:800;}
+.t.bp{background:rgba(198,40,40,.08);color:var(--red);font-size:9px;font-weight:800;}
+.mn{font-weight:700;font-size:12px;}.mm{font-size:9.5px;color:var(--text3);margin-top:1px;}
+.m{font-family:'JetBrains Mono',monospace;font-weight:600;font-size:11px;}
+.m.f{color:var(--green);}.m.o{color:var(--orange);}.m.r{color:var(--red);}.m.e{color:var(--purple);}
+.co{font-family:'JetBrains Mono',monospace;font-size:10px;}
+.co.fr{color:var(--green);font-weight:700;}.co.pd{color:var(--purple);}
+.st{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:var(--text3);margin:24px 0 8px;padding-left:4px;}
+.vg{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:8px;margin-top:12px;}
+.vc{background:var(--card);border-radius:10px;padding:14px;border:1px solid rgba(0,0,0,.04);position:relative;overflow:hidden;}
+.vc::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;}
+.vc.b::before{background:var(--green);}.vc.a::before{background:var(--orange);}.vc.cv::before{background:var(--purple);}
+.vc h3{font-size:12px;font-weight:800;margin-bottom:3px;}
+.vc .cm{background:var(--navy);color:#4dd0e1;font-family:'JetBrains Mono',monospace;font-size:10px;padding:4px 8px;border-radius:5px;margin-top:6px;}
+.vc p{font-size:11px;color:var(--text2);line-height:1.4;}
+.ft{text-align:center;padding:20px 12px;font-size:9px;color:var(--text3);font-family:'JetBrains Mono',monospace;}
+</style>
+</head>
+<body>
+
+<div class="hdr">
+  <h1>Top 10 LLMs -  Local + Cloud Flagships</h1>
+  <div class="sub">ArgusWatch AI · Your Hardware · March 2026</div>
+  <div class="hw"><span>Ryzen 9 9950X3D</span><span>64GB DDR5</span><span>~17GB VRAM</span><span>Rancher Desktop</span></div>
+</div>
+
+<div class="c">
+
+<div class="leg">
+  <span><span class="d l"></span> Local -  free, private, your PC</span>
+  <span><span class="d cl"></span> Cloud API -  paid, flagship tier, one-click switch</span>
+</div>
+
+<div class="note">
+  Local speeds = estimated t/s on your hardware at Q4. Cloud speeds = API output t/s. <b>GPQA</b> = graduate reasoning. <b>SWE</b> = real GitHub bug fixes. <b>Terminal</b> = CLI/agentic. Cost = per 1M tokens (in/out). All cloud models already wired in ArgusWatch -  one click from dashboard header.
+</div>
+
+<div class="tw">
+<table>
+<thead>
+<tr><th>#</th><th>Model</th><th>Type</th><th>Size / Disk</th><th>Speed</th><th>GPQA</th><th>SWE-bench</th><th>Terminal</th><th>Context</th><th>Tools</th><th>Cost</th><th>ArgusWatch Role</th></tr>
+</thead>
+<tbody>
+
+<tr class="pk">
+  <td><span class="rk g">1</span></td>
+  <td><div class="mn">Qwen 3.5 9B <span class="t pk">LOCAL PICK</span></div><div class="mm">Alibaba · Mar 2026</div><span class="t hy">Hybrid</span><span class="t vi">Vision</span><span class="t to">Tools</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">9B · 6.6GB</td>
+  <td class="m f">40-60 t/s</td>
+  <td class="m">81.7</td>
+  <td class="m"> - </td>
+  <td class="m"> - </td>
+  <td class="m">256K</td>
+  <td>✅ RL-native</td>
+  <td class="co fr">FREE</td>
+  <td>Daily default. Free, private, best local balance. 91.5 IFEval (JSON).</td>
+</tr>
+
+<tr class="cl">
+  <td><span class="rk s">2</span></td>
+  <td><div class="mn">Gemini 3.1 Pro <span class="t bv">BEST VALUE</span></div><div class="mm">Google · Feb 2026</div><span class="t to">Tools</span><span class="t vi">Vision</span></td>
+  <td><span class="t ct">CLOUD</span></td>
+  <td class="m e">Proprietary</td>
+  <td class="m e">50-70 t/s</td>
+  <td class="m e">94.3 🏆</td>
+  <td class="m e">80.6%</td>
+  <td class="m e">68.5%</td>
+  <td class="m e">1M</td>
+  <td>✅ Native+MCP</td>
+  <td class="co pd">$2 / $12</td>
+  <td>Highest GPQA ever. #1 on 12/18 benchmarks. Cheapest flagship. GOOGLE_AI_API_KEY.</td>
+</tr>
+
+<tr class="cl">
+  <td><span class="rk b">3</span></td>
+  <td><div class="mn">Claude Opus 4.6 <span class="t bp">BEST QUALITY</span></div><div class="mm">Anthropic · Feb 2026</div><span class="t to">Tools</span><span class="t vi">Vision</span></td>
+  <td><span class="t ct">CLOUD</span></td>
+  <td class="m e">Proprietary</td>
+  <td class="m e">~25-35 t/s</td>
+  <td class="m e">91.3</td>
+  <td class="m e">80.8%</td>
+  <td class="m e">65.4%</td>
+  <td class="m e">1M</td>
+  <td>✅ Native</td>
+  <td class="co pd">$5 / $25</td>
+  <td>Deepest reasoning. 72.7% OSWorld. Agent Teams. ANTHROPIC_MODEL=claude-opus-4-6.</td>
+</tr>
+
+<tr class="cl">
+  <td><span class="rk n">4</span></td>
+  <td><div class="mn">GPT-5.3 Codex <span class="t bp">BEST CODING</span></div><div class="mm">OpenAI · Feb 2026</div><span class="t to">Tools</span><span class="t vi">Vision</span></td>
+  <td><span class="t ct">CLOUD</span></td>
+  <td class="m e">Proprietary</td>
+  <td class="m e">~40-60 t/s</td>
+  <td class="m e">81.0</td>
+  <td class="m e">56.8% Pro</td>
+  <td class="m e">77.3% 🏆</td>
+  <td class="m e">400K</td>
+  <td>✅ Native</td>
+  <td class="co pd">$1.75 / $14</td>
+  <td>Terminal king. 25% faster, fewer tokens than rivals. OPENAI_MODEL=gpt-5.3-codex.</td>
+</tr>
+
+<tr>
+  <td><span class="rk n">5</span></td>
+  <td><div class="mn">GPT-OSS 20B</div><div class="mm">OpenAI · Aug 2025</div><span class="t moe">MoE 3.6B active</span><span class="t to">Tools</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">20B · ~13GB</td>
+  <td class="m f">80-140 t/s</td>
+  <td class="m">~72</td>
+  <td class="m"> - </td>
+  <td class="m"> - </td>
+  <td class="m">128K</td>
+  <td>✅ Native</td>
+  <td class="co fr">FREE</td>
+  <td>Fastest local. MoE=3.6B active. Weak facts (6.7% SimpleQA). Structured output issues.</td>
+</tr>
+
+<tr>
+  <td><span class="rk n">6</span></td>
+  <td><div class="mn">GLM-4.6V Flash 9B</div><div class="mm">Zhipu AI · Feb 2026</div><span class="t vi">Vision</span><span class="t to">Tools</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">9B · ~6GB</td>
+  <td class="m f">45-65 t/s</td>
+  <td class="m">~65</td>
+  <td class="m"> - </td>
+  <td class="m"> - </td>
+  <td class="m">128K</td>
+  <td>✅ 87.4% τ²</td>
+  <td class="co fr">FREE</td>
+  <td>Best local agent model. 87.4% agent bench. MIT. Swap if Qwen tools disappoint.</td>
+</tr>
+
+<tr>
+  <td><span class="rk n">7</span></td>
+  <td><div class="mn">Qwen 3 14B</div><div class="mm">Alibaba · Apr 2025</div><span class="t to">Tools</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">14B · ~8.5GB</td>
+  <td class="m f">35-50 t/s</td>
+  <td class="m">~68</td>
+  <td class="m"> - </td>
+  <td class="m"> - </td>
+  <td class="m">128K</td>
+  <td>✅ Yes</td>
+  <td class="co fr">FREE</td>
+  <td>Previous gen, battle-tested. Think/no-think. Reliable fallback.</td>
+</tr>
+
+<tr>
+  <td><span class="rk n">8</span></td>
+  <td><div class="mn">Qwen 3.5 4B</div><div class="mm">Alibaba · Mar 2026</div><span class="t hy">Hybrid</span><span class="t vi">Vision</span><span class="t to">Tools</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">4B · 2.7GB</td>
+  <td class="m f">80-120 t/s</td>
+  <td class="m">~70</td>
+  <td class="m"> - </td>
+  <td class="m"> - </td>
+  <td class="m">256K</td>
+  <td>✅ RL-native</td>
+  <td class="co fr">FREE</td>
+  <td>Insane for 4B. Same arch as 9B. Run alongside anything at 2.7GB.</td>
+</tr>
+
+<tr>
+  <td><span class="rk n">9</span></td>
+  <td><div class="mn">Qwen3-Coder-Next 80B-A3B</div><div class="mm">Alibaba · 2026</div><span class="t moe">MoE 3B active</span><span class="t to">Tools</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">80B · ~14GB</td>
+  <td class="m o">25-40 t/s</td>
+  <td class="m">~75</td>
+  <td class="m">70.6%</td>
+  <td class="m"> - </td>
+  <td class="m">256K</td>
+  <td>✅ Strong</td>
+  <td class="co fr">FREE</td>
+  <td>Best local coder. 70.6% SWE-bench. Tight fit at ~14GB. Apache 2.0.</td>
+</tr>
+
+<tr>
+  <td><span class="rk n">10</span></td>
+  <td><div class="mn">Gemma 3 12B</div><div class="mm">Google · Mar 2025</div><span class="t vi">Vision</span></td>
+  <td><span class="t fr">LOCAL</span></td>
+  <td class="m">12B · ~8GB</td>
+  <td class="m f">35-50 t/s</td>
+  <td class="m">~60</td>
+  <td class="m"> - </td>
+  <td class="m"> - </td>
+  <td class="m">128K</td>
+  <td>⚠️ Limited</td>
+  <td class="co fr">FREE</td>
+  <td>Strong creative writing. Weaker on structured output + tools.</td>
+</tr>
+
+</tbody>
+</table>
+</div>
+
+<div class="st">ArgusWatch 4-Provider Strategy</div>
+<div class="note p">
+  <b>Every provider has a flagship wired in.</b> The dashboard header switches between them in one click -  no restart, no code change. Default to Qwen 3.5 9B locally (free, private). Switch to Gemini 3.1 Pro for best-value cloud ($2/M). Switch to Claude Opus 4.6 for deepest reasoning ($5/M). Switch to GPT-5.3 Codex for terminal/coding tasks ($1.75/M). The platform chooses the right tool for the job.
+</div>
+
+<div class="vg">
+<div class="vc b"><h3>🟢 Default: Qwen 3.5 9B</h3><p>Free. Private. 40-60 t/s. 6.6GB. RL-trained tools. 91.5 IFEval. No data leaves your machine.</p><div class="cm">OLLAMA_MODEL=qwen3.5:9b</div></div>
+<div class="vc cv"><h3>🟣 Best Value: Gemini 3.1 Pro</h3><p>94.3% GPQA 🏆. 80.6% SWE. $2/M in. #1 on 12/18 benchmarks. 1M context.</p><div class="cm">GOOGLE_AI_API_KEY=AIza...</div></div>
+<div class="vc cv"><h3>🟣 Deepest: Claude Opus 4.6</h3><p>91.3% GPQA. 80.8% SWE. Agent Teams. 72.7% OSWorld. $5/$25.</p><div class="cm">ANTHROPIC_MODEL=claude-opus-4-6</div></div>
+<div class="vc a"><h3>🟠 Coding: GPT-5.3 Codex</h3><p>77.3% Terminal 🏆. 56.8% SWE-Pro. 25% faster. Fewer tokens. $1.75/$14.</p><div class="cm">OPENAI_MODEL=gpt-5.3-codex</div></div>
+</div>
+
+</div>
+<div class="ft">Ryzen 9 9950X3D · 64GB DDR5 · ~17GB VRAM · Solvent CyberSecurity · March 2026<br>Sources: Artificial Analysis, Google DeepMind, Anthropic, OpenAI, VentureBeat, HuggingFace</div>
+</body>
+</html>

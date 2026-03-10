@@ -1,0 +1,347 @@
+# ═══════════════════════════════════════════════════════════════
+# ArgusWatch AI-Agentic Threat Intelligence v16.4.7
+# Solvent CyberSecurity LLC
+#
+# ALL 10 SERVICES HAVE HEALTHCHECKS
+# 5-Tier dependency ordering enforces correct boot sequence
+#
+# PORTS:
+#   Dashboard   http://localhost:7777
+#   API Docs    http://localhost:7777/docs
+#   HTTPS       https://localhost:9443
+#   Prometheus  http://localhost:9091
+#   Intel-Proxy http://localhost:9010/docs
+#   Recon       http://localhost:9011/docs
+#   PostgreSQL  localhost:5433
+#   Redis       localhost:6380
+#   Ollama      localhost:11435
+# ═══════════════════════════════════════════════════════════════
+
+services:
+  # ─── TIER 1: Infrastructure (no dependencies) ───
+  postgres:
+    image: postgres:16-alpine
+    container_name: arguswatch-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-arguswatch}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-arguswatch}
+    ports: ["5433:5432"]
+    volumes:
+     - pgdata:/var/lib/postgresql/data
+     - ./initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U arguswatch"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  redis:
+    image: redis:7-alpine
+    container_name: arguswatch-redis
+    ports: ["6380:6379"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  ollama:
+    image: ollama/ollama:latest
+    container_name: arguswatch-ollama
+    ports: ["11435:11434"]
+    volumes:
+     - ollama_data:/root/.ollama
+     - ./scripts/ollama-entrypoint.sh:/entrypoint.sh:ro
+    environment:
+     - OLLAMA_HOST=0.0.0.0
+     - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+    entrypoint: ["/bin/bash", "/entrypoint.sh"]
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/.model_ready && curl -sf http://localhost:11434/api/tags | grep -q qwen3"]
+      interval: 10s
+      timeout: 5s
+      retries: 120
+      start_period: 60s
+    restart: unless-stopped
+
+  # ─── TIER 2: Microservices (depend on postgres healthy) ───
+  intel-proxy:
+    build: {context: ., dockerfile: intel-proxy/Dockerfile}
+    container_name: arguswatch-intel-proxy
+    environment:
+     - POSTGRES_USER=${POSTGRES_USER:-arguswatch}
+     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+     - POSTGRES_HOST=postgres
+     - POSTGRES_PORT=5432
+     - POSTGRES_DB=${POSTGRES_DB:-arguswatch}
+     - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+     - OTX_API_KEY=${OTX_API_KEY:-}
+     - SHODAN_API_KEY=${SHODAN_API_KEY:-}
+     - URLSCAN_API_KEY=${URLSCAN_API_KEY:-}
+     - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+     - CENSYS_API_ID=${CENSYS_API_ID:-}
+     - CENSYS_API_SECRET=${CENSYS_API_SECRET:-}
+     - INTELX_API_KEY=${INTELX_API_KEY:-}
+     - PULSEDIVE_API_KEY=${PULSEDIVE_API_KEY:-}
+     - HIBP_API_KEY=${HIBP_API_KEY:-}
+     - BREACH_DIRECTORY_API_KEY=${BREACH_DIRECTORY_API_KEY:-}
+     - SOCRADAR_API_KEY=${SOCRADAR_API_KEY:-}
+     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+     - PHISHTANK_API_KEY=${PHISHTANK_API_KEY:-}
+     - GRAYHATWARFARE_API_KEY=${GRAYHATWARFARE_API_KEY:-}
+     - LEAKIX_API_KEY=${LEAKIX_API_KEY:-}
+     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+     - TELEGRAM_CHANNELS=${TELEGRAM_CHANNELS:-}
+     - SPYCLOUD_API_KEY=${SPYCLOUD_API_KEY:-}
+     - RECORDED_FUTURE_KEY=${RECORDED_FUTURE_KEY:-}
+     - CYBERINT_API_KEY=${CYBERINT_API_KEY:-}
+     - FLARE_API_KEY=${FLARE_API_KEY:-}
+     - CROWDSTRIKE_CLIENT_ID=${CROWDSTRIKE_CLIENT_ID:-}
+     - CROWDSTRIKE_SECRET=${CROWDSTRIKE_SECRET:-}
+     - GREYNOISE_API_KEY=${GREYNOISE_API_KEY:-}
+     - BINARYEDGE_API_KEY=${BINARYEDGE_API_KEY:-}
+     - LEAKCHECK_API_KEY=${LEAKCHECK_API_KEY:-}
+     - MANDIANT_API_KEY=${MANDIANT_API_KEY:-}
+     - CYBERSIXGILL_CLIENT_ID=${CYBERSIXGILL_CLIENT_ID:-}
+     - CYBERSIXGILL_SECRET=${CYBERSIXGILL_SECRET:-}
+     - HUDSON_ROCK_API_KEY=${HUDSON_ROCK_API_KEY:-}
+     - PASTE_EE_API_KEY=${PASTE_EE_API_KEY:-}
+    ports: ["9010:9000"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:9000/health')\" || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  recon-engine:
+    build: {context: ./recon-engine, dockerfile: Dockerfile}
+    container_name: arguswatch-recon
+    environment:
+     - POSTGRES_USER=${POSTGRES_USER:-arguswatch}
+     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+     - POSTGRES_HOST=postgres
+     - POSTGRES_PORT=5432
+     - POSTGRES_DB=${POSTGRES_DB:-arguswatch}
+    ports: ["9011:9001"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9001/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
+
+  # ─── TIER 3: Core backend (depends on tier 1 + tier 2 healthy) ───
+  backend:
+    build: {context: ./backend, dockerfile: Dockerfile}
+    container_name: arguswatch-backend
+    environment:
+     - POSTGRES_USER=${POSTGRES_USER:-arguswatch}
+     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+     - POSTGRES_HOST=postgres
+     - POSTGRES_PORT=5432
+     - POSTGRES_DB=${POSTGRES_DB:-arguswatch}
+     - REDIS_URL=redis://redis:6379/0
+     - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+     - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+     - AI_AUTONOMOUS=true
+     - AI_ACTIVE_PROVIDER=${AI_ACTIVE_PROVIDER:-ollama}
+     - INTEL_PROXY_URL=http://intel-proxy:9000
+     - RECON_ENGINE_URL=http://recon-engine:9001
+     - AUTH_DISABLED=${AUTH_DISABLED:-true}
+     - JWT_SECRET_KEY=${JWT_SECRET_KEY:?Set JWT_SECRET_KEY in .env}
+     - JWT_EXPIRE_HOURS=${JWT_EXPIRE_HOURS:-24}
+     - ADMIN_USER=${ADMIN_USER:-admin}
+     - ADMIN_PASSWORD=${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env}
+     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+     - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY:-}
+     - API_KEY=${API_KEY:-}
+     - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+     - OTX_API_KEY=${OTX_API_KEY:-}
+     - URLSCAN_API_KEY=${URLSCAN_API_KEY:-}
+     - SHODAN_API_KEY=${SHODAN_API_KEY:-}
+     - HIBP_API_KEY=${HIBP_API_KEY:-}
+     - BREACH_DIRECTORY_API_KEY=${BREACH_DIRECTORY_API_KEY:-}
+     - SOCRADAR_API_KEY=${SOCRADAR_API_KEY:-}
+     - CENSYS_API_ID=${CENSYS_API_ID:-}
+     - CENSYS_API_SECRET=${CENSYS_API_SECRET:-}
+     - ABUSEIPDB_API_KEY=${ABUSEIPDB_API_KEY:-}
+     - GRAYHATWARFARE_API_KEY=${GRAYHATWARFARE_API_KEY:-}
+     - LEAKIX_API_KEY=${LEAKIX_API_KEY:-}
+     - PULSEDIVE_API_KEY=${PULSEDIVE_API_KEY:-}
+     - INTELX_API_KEY=${INTELX_API_KEY:-}
+     - GREYNOISE_API_KEY=${GREYNOISE_API_KEY:-}
+     - BINARYEDGE_API_KEY=${BINARYEDGE_API_KEY:-}
+     - LEAKCHECK_API_KEY=${LEAKCHECK_API_KEY:-}
+     - SPYCLOUD_API_KEY=${SPYCLOUD_API_KEY:-}
+     - RECORDED_FUTURE_KEY=${RECORDED_FUTURE_KEY:-}
+     - CROWDSTRIKE_CLIENT_ID=${CROWDSTRIKE_CLIENT_ID:-}
+     - CROWDSTRIKE_SECRET=${CROWDSTRIKE_SECRET:-}
+     - CYBERINT_API_KEY=${CYBERINT_API_KEY:-}
+     - FLARE_API_KEY=${FLARE_API_KEY:-}
+     - CYBERSIXGILL_CLIENT_ID=${CYBERSIXGILL_CLIENT_ID:-}
+     - CYBERSIXGILL_SECRET=${CYBERSIXGILL_SECRET:-}
+     - MANDIANT_API_KEY=${MANDIANT_API_KEY:-}
+     - HUDSON_ROCK_API_KEY=${HUDSON_ROCK_API_KEY:-}
+     - PHISHTANK_API_KEY=${PHISHTANK_API_KEY:-}
+     - PASTE_EE_API_KEY=${PASTE_EE_API_KEY:-}
+     - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+     - TELEGRAM_CHANNELS=${TELEGRAM_CHANNELS:-}
+     - TELEGRAM_API_ID=${TELEGRAM_API_ID:-}
+     - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:-}
+     - TELEGRAM_PHONE=${TELEGRAM_PHONE:-}
+     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+     - SECURITYTRAILS_API_KEY=${SECURITYTRAILS_API_KEY:-}
+     - AGENT_SIGNING_KEY=${AGENT_SIGNING_KEY:-}
+     - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+     - SMTP_HOST=${SMTP_HOST:-}
+     - SMTP_PORT=${SMTP_PORT:-587}
+     - SMTP_USER=${SMTP_USER:-}
+     - SMTP_PASS=${SMTP_PASS:-}
+     - ALERT_EMAIL=${ALERT_EMAIL:-}
+     - CISO_EMAIL=${CISO_EMAIL:-}
+    ports: ["7777:8000"]
+    volumes:
+     - reports_data:/app/reports
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      intel-proxy: {condition: service_healthy}
+      recon-engine: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+
+  # ─── TIER 4: Workers (depend on backend healthy) ───
+  celery_worker:
+    build: {context: ./backend, dockerfile: Dockerfile}
+    container_name: arguswatch-celery-worker
+    entrypoint: []
+    command: ["celery", "-A", "arguswatch.celery_app", "worker", "-l", "info", "-c", "4"]
+    environment:
+     - POSTGRES_USER=${POSTGRES_USER:-arguswatch}
+     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+     - POSTGRES_HOST=postgres
+     - POSTGRES_PORT=5432
+     - POSTGRES_DB=${POSTGRES_DB:-arguswatch}
+     - REDIS_URL=redis://redis:6379/0
+     - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+     - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+     - AI_AUTONOMOUS=true
+     - AI_ACTIVE_PROVIDER=${AI_ACTIVE_PROVIDER:-ollama}
+     - INTEL_PROXY_URL=http://intel-proxy:9000
+     - RECON_ENGINE_URL=http://recon-engine:9001
+     - VIRUSTOTAL_API_KEY=${VIRUSTOTAL_API_KEY:-}
+     - OTX_API_KEY=${OTX_API_KEY:-}
+     - URLSCAN_API_KEY=${URLSCAN_API_KEY:-}
+     - SHODAN_API_KEY=${SHODAN_API_KEY:-}
+     - HIBP_API_KEY=${HIBP_API_KEY:-}
+     - BREACH_DIRECTORY_API_KEY=${BREACH_DIRECTORY_API_KEY:-}
+     - SOCRADAR_API_KEY=${SOCRADAR_API_KEY:-}
+     - TELEGRAM_API_ID=${TELEGRAM_API_ID:-}
+     - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:-}
+     - TELEGRAM_PHONE=${TELEGRAM_PHONE:-}
+     - SLACK_WEBHOOK_URL=${SLACK_WEBHOOK_URL:-}
+     - SMTP_HOST=${SMTP_HOST:-}
+     - SMTP_PORT=${SMTP_PORT:-587}
+     - SMTP_USER=${SMTP_USER:-}
+     - SMTP_PASS=${SMTP_PASS:-}
+     - ALERT_EMAIL=${ALERT_EMAIL:-}
+     - CISO_EMAIL=${CISO_EMAIL:-}
+     - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+     - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+     - GITHUB_TOKEN=${GITHUB_TOKEN:-}
+     - GOOGLE_AI_API_KEY=${GOOGLE_AI_API_KEY:-}
+    volumes:
+     - reports_data:/app/reports
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A arguswatch.celery_app inspect ping --timeout 10 2>/dev/null | grep -q OK || exit 1"]
+      interval: 30s
+      timeout: 15s
+      retries: 5
+      start_period: 30s
+
+  celery_beat:
+    build: {context: ./backend, dockerfile: Dockerfile}
+    container_name: arguswatch-celery-beat
+    entrypoint: []
+    command: ["celery", "-A", "arguswatch.celery_app", "beat", "-l", "info", "--pidfile=/tmp/celerybeat.pid"]
+    environment:
+     - POSTGRES_USER=${POSTGRES_USER:-arguswatch}
+     - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+     - POSTGRES_HOST=postgres
+     - POSTGRES_PORT=5432
+     - POSTGRES_DB=${POSTGRES_DB:-arguswatch}
+     - REDIS_URL=redis://redis:6379/0
+     - OLLAMA_URL=${OLLAMA_URL:-http://ollama:11434}
+     - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen3:8b}
+     - AI_AUTONOMOUS=true
+     - AI_ACTIVE_PROVIDER=${AI_ACTIVE_PROVIDER:-ollama}
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/celerybeat.pid && kill -0 $(cat /tmp/celerybeat.pid) 2>/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # ─── TIER 5: Edge services (depend on backend healthy) ───
+  nginx:
+    build: ./nginx
+    container_name: aw-nginx
+    ports: ["8080:80", "9443:443"]
+    volumes: [ssl_certs:/etc/nginx/ssl]
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:80/nginx-health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+  prometheus:
+    image: prom/prometheus:v2.51.0
+    container_name: arguswatch-prometheus
+    volumes:
+     - ./config/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+     - ./config/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+     - prometheus_data:/prometheus
+    ports: ["9091:9090"]
+    depends_on:
+      backend: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9090/-/healthy || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  reports_data:
+  ollama_data:
+  ssl_certs:
+  prometheus_data:

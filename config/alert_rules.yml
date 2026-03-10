@@ -1,0 +1,55 @@
+groups:
+ - name: arguswatch_alerts
+    rules:
+      # Backend down
+     - alert: BackendDown
+        expr: up{job="arguswatch-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "ArgusWatch backend is down"
+          description: "Backend has been unreachable for more than 2 minutes."
+
+      # High error rate
+     - alert: HighErrorRate
+        expr: |
+          sum(rate(arguswatch_http_requests_total{status=~"5.."}[5m]))
+          / sum(rate(arguswatch_http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API error rate above 5%"
+          description: "{{ $value | humanizePercentage }} of requests are failing."
+
+      # Open critical findings spike
+     - alert: CriticalFindingsSpike
+        expr: arguswatch_findings_open > 100
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Over 100 open findings"
+          description: "{{ $value }} findings are open. Review triage queue."
+
+      # Collector stale (no run in 2 hours)
+     - alert: CollectorStale
+        expr: (time() - arguswatch_collectors_last_run) > 7200
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Collector {{ $labels.source }} hasn't run in 2+ hours"
+          description: "Last run was {{ $value | humanizeDuration }} ago."
+
+      # High request latency
+     - alert: HighLatency
+        expr: |
+          arguswatch_http_request_duration_seconds_sum
+          / arguswatch_http_request_duration_seconds_count > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "API average latency above 2s"

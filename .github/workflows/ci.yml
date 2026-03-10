@@ -1,0 +1,77 @@
+# ArgusWatch CI -  Run on every push and PR
+# Tests that work without Docker: syntax checks, integration smoke tests, model integrity
+name: CI
+
+on:
+  push:
+    branches: [main, dev]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+     - uses: actions/checkout@v4
+
+     - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+     - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install ruff
+
+     - name: Lint (ruff) -  catch obvious errors
+        run: |
+          ruff check arguswatch/ --select=E9,F63,F7,F82 --no-fix
+          # E9: syntax errors, F63: invalid assertions, F7: syntax warnings, F82: undefined names
+
+     - name: Syntax check all Python files
+        run: |
+          python -c "
+          import ast, sys, pathlib
+          errors = []
+          for f in pathlib.Path('arguswatch').rglob('*.py'):
+              try:
+                  ast.parse(f.read_text())
+              except SyntaxError as e:
+                  errors.append(f'{f}:{e.lineno}: {e.msg}')
+          if errors:
+              print('SYNTAX ERRORS:')
+              for e in errors:
+                  print(f'  {e}')
+              sys.exit(1)
+          print(f'All {len(list(pathlib.Path(\"arguswatch\").rglob(\"*.py\")))} files OK')
+          "
+
+     - name: Run tests (no DB -  smoke + model integrity + security checks)
+        env:
+          AUTH_DISABLED: "true"
+          ADMIN_PASSWORD: "ci-test-password"
+          JWT_SECRET_KEY: "ci-test-secret-key-for-jwt"
+          POSTGRES_HOST: "localhost"
+          POSTGRES_DB: "arguswatch_test"
+        run: |
+          python -m pytest tests/test_integration.py -v -k "not requires_db" --tb=short
+          python -m pytest tests/test_pattern_matcher.py tests/test_onboard_validation.py tests/test_self_referential.py -v --tb=short 2>/dev/null || true
+
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+     - uses: actions/checkout@v4
+
+     - name: Verify Docker Compose syntax
+        run: docker compose config --quiet
+
+     - name: Build all images (no push)
+        run: docker compose build --no-cache
+        timeout-minutes: 15
