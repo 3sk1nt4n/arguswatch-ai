@@ -933,7 +933,7 @@ async def onboard_customer(request: Request, db: AsyncSession = Depends(get_db))
         errors.append("domain is required (or provide email to auto-extract)")
     
     if errors:
-        return {"error": "Validation failed", "details": errors}
+        raise HTTPException(status_code=422, detail={"error": "Validation failed", "details": errors})
     
     # ── V16.4.6: Domain-name sanity check ──
     # Prevents onboarding "PAYPAL" with domain "apple.com"
@@ -970,7 +970,7 @@ async def onboard_customer(request: Request, db: AsyncSession = Depends(get_db))
     try:
       existing = await db.execute(select(Customer).where(Customer.name == name))
       if existing.scalar_one_or_none():
-        return {"error": f"Customer '{name}' already exists"}
+        raise HTTPException(status_code=409, detail=f"Customer '{name}' already exists")
     except Exception as e:
       return JSONResponse(status_code=500, content={"error": "DB check failed", "detail": str(e)[:200]})
     
@@ -2112,8 +2112,9 @@ async def customer_sla_compliance(cid: int, db: AsyncSession = Depends(get_db)):
         deadline = getattr(f, "sla_deadline", None)
         resolved = getattr(f, "resolved_at", None)
         status = getattr(f, "status", "")
-        
-        if status in ("REMEDIATED", "VERIFIED_CLOSED", "FALSE_POSITIVE", "CLOSED"):
+        status_str = status.value if hasattr(status, 'value') else str(status)
+
+        if status_str in ("REMEDIATED", "VERIFIED_CLOSED", "FALSE_POSITIVE", "CLOSED"):
             if deadline and resolved:
                 if resolved <= deadline:
                     met += 1
@@ -4157,7 +4158,7 @@ async def create_manual_remediation(request: Request, db: AsyncSession = Depends
     if not title:
         raise HTTPException(422, "title is required")
     rem = FindingRemediation(
-        finding_id=body.get("finding_id") or 0,
+        finding_id=body.get("finding_id") or None,
         playbook_key="manual",
         action_type=body.get("action_type", "manual"),
         title=title,
