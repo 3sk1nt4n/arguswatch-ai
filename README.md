@@ -28,6 +28,16 @@
 
 ArgusWatch is a production-grade, multi-tenant AI-Agentic threat intelligence platform for MSSPs. It collects IOCs from 47 real threat feeds, correlates them against customer assets using 8 matching strategies, and presents every finding with a provable evidence trail. AI runs locally on Qwen 3 8B via Ollama with GPU acceleration (free, private, 2-5s responses), with one-click switching to Claude, GPT, or Gemini from the dashboard header.
 
+
+<img width="1343" height="964" alt="1" src="https://github.com/user-attachments/assets/9ae21a8b-fd4f-4d86-ba90-95450ad28b2a" />
+<img width="1343" height="964" alt="Threat Universe" src="https://github.com/user-attachments/assets/c27fee48-a8ed-4d07-a140-ed154241257f" />
+<img width="1343" height="964" alt="3" src="https://github.com/user-attachments/assets/3897ba4d-c37f-4e3b-a9c7-d8e63feb2277" />
+<img width="1005" height="963" alt="2" src="https://github.com/user-attachments/assets/b32e27f4-0d6e-4b93-855e-19a7aa4fe00e" />
+
+
+
+
+
 ### Why "AI-Agentic"?
 
 The core of ArgusWatch is an **autonomous AI orchestrator** that investigates threats the way a human SOC analyst would -  but faster:
@@ -824,21 +834,40 @@ Weekly pulls from MITRE STIX GitHub. Flags deprecated techniques in registry. Su
 
 ---
 
-## 📜 Patents
+## Pending-Patents
 
-| Patent | Filing | Status |
-|--------|--------|--------|
-| VulnPilot AI (Triple-Lock Safety) | US 63/983,055 | Filed |
-| Ghost Risks Detection | US 63/983,059 | Filed |
-| VCTS Scenario Engine | US 63/983,697 | Filed |
-| IAMPilot (Identity Threat Assessment) | US 63/987,743 | Filed |
+| Application | Title |
+|------------|-------|
+| US 63/983,055 | VulnPilot - AI vulnerability prioritization |
+| US 63/983,059 | Ghost Risks - undetected threat identification |
+| US 63/983,697 | VCTS - vulnerability scenario engine |
+| US 63/987,743 | IAMPilot - governance-modulated identity threat assessment |
 
 ---
+
+## License
+
+Proprietary - Solvent CyberSecurity LLC. All rights reserved.
+
+---
+
 
 <div align="center">
 
 <img src="backend/arguswatch/static/solvent-icon.svg" alt="Solvent" width="24" height="24">
 
-**[Solvent CyberSecurity LLC](https://solventcyber.com)** -  *ArgusWatch: See Everything. Miss Nothing.*
+ *ArgusWatch: See Everything. Miss Nothing.*
+ 
+ <br>
+
+**Cyber AI Architecture**
+
+Built by [**3sk1nt4n**](https://www.credly.com/users/eskintan/badges)
+
+[Solvent CyberSecurity LLC](https://solventcyber.com) - *Defending what matters. One command at a time.*
+
+<br>
 
 </div>
+
+<div align="center">
