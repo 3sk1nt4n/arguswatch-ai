@@ -193,11 +193,11 @@ async def _async_pipeline(detection_id: int) -> dict:
                             "otx_pulses": changes.get("otx_pulses", 0),
                         }
 
-                        # ── Step 5a-pre: FP Memory check - before AI call ──
+                        # ── Step 4.5: FP MEMORY CHECK - check before AI triage ──
                         _fp_auto_closed = False
-                        try:
-                            from arguswatch.engine.fp_memory import check_fp_history
-                            if _f5.customer_id:
+                        if _f5.customer_id:
+                            try:
+                                from arguswatch.engine.fp_memory import check_fp_history
                                 _fp_check = await check_fp_history(
                                     customer_id=_f5.customer_id,
                                     ioc_type=_f5.ioc_type or "",
@@ -208,7 +208,7 @@ async def _async_pipeline(detection_id: int) -> dict:
                                 if _fp_check and _fp_check.get("auto_close"):
                                     _f5.ai_false_positive_flag = True
                                     _f5.ai_false_positive_reason = (
-                                        f"FP Memory auto-close: {_fp_check.get('reason', '')} "
+                                        f"FP Memory auto-close: {_fp_check.get('reason', '')[:200]} "
                                         f"(confirmed {_fp_check.get('hit_count', 0)}x, "
                                         f"conf={_fp_check.get('confidence', 0):.2f})"
                                     )
@@ -216,47 +216,18 @@ async def _async_pipeline(detection_id: int) -> dict:
                                     _f5.status = _DS_FP.FALSE_POSITIVE
                                     _fp_auto_closed = True
                                     results["steps"].append(
-                                        f"FP Memory auto-close: {_fp_check.get('reason','')[:60]} "
-                                        f"(hits={_fp_check.get('hit_count',0)})"
+                                        f"FP Memory auto-close: pattern#{_fp_check.get('pattern_id')} "
+                                        f"hits={_fp_check.get('hit_count')} "
+                                        f"conf={_fp_check.get('confidence', 0):.2f}"
                                     )
+                                    await db.flush()
+                                    results["steps"].append("Skipped AI triage (known FP pattern)")
+                                    return results
                                 elif _fp_check and not _fp_check.get("auto_close"):
                                     # Low-confidence FP match - pass context to AI triage
                                     _enrich_data["fp_memory_match"] = True
                                     _enrich_data["fp_memory_reason"] = _fp_check.get("reason", "")
                                     _enrich_data["fp_memory_confidence"] = _fp_check.get("confidence", 0)
-                        except Exception as _efp:
-                            logger.debug(f"[pipeline] FP memory check failed (non-fatal): {_efp}")
-
-                        # ── Step 4.5: FP MEMORY CHECK - check before AI triage ──
-                        _fp_memory_hit = None
-                        if _f5.customer_id:
-                            try:
-                                from arguswatch.engine.fp_memory import check_fp_history
-                                _fp_memory_hit = await check_fp_history(
-                                    customer_id=_f5.customer_id,
-                                    ioc_type=_f5.ioc_type or "",
-                                    ioc_value=_f5.ioc_value or "",
-                                    source=(_f5.all_sources or ["unknown"])[0],
-                                    db=db,
-                                )
-                                if _fp_memory_hit and _fp_memory_hit.get("auto_close"):
-                                    _f5.ai_false_positive_flag = True
-                                    _f5.ai_false_positive_reason = (
-                                        f"FP Memory auto-close: {_fp_memory_hit.get('reason', '')[:200]} "
-                                        f"(confirmed {_fp_memory_hit.get('hit_count', 0)}x, "
-                                        f"conf={_fp_memory_hit.get('confidence', 0):.2f})"
-                                    )
-                                    from arguswatch.models import DetectionStatus as _DS_fp
-                                    _f5.status = _DS_fp.FALSE_POSITIVE
-                                    results["steps"].append(
-                                        f"FP Memory auto-close: pattern#{_fp_memory_hit.get('pattern_id')} "
-                                        f"hits={_fp_memory_hit.get('hit_count')} "
-                                        f"conf={_fp_memory_hit.get('confidence', 0):.2f}"
-                                    )
-                                    await db.flush()
-                                    # Skip AI triage entirely - known FP
-                                    results["steps"].append("Skipped AI triage (known FP pattern)")
-                                    return results
                             except Exception as _efp:
                                 logger.debug(f"[pipeline] FP memory check failed (non-fatal): {_efp}")
 
@@ -672,10 +643,10 @@ def _normalize_detection(det) -> None:
     if det.ioc_type not in ("sha256", "md5", "sha1", "aws_access_key", "github_pat"):
         val = val.lower()
     # Strip common URL wrappers
-    if val.startswith("hxxp"):
-        val = "http" + val[4:]
     if val.startswith("hxxps"):
         val = "https" + val[5:]
+    elif val.startswith("hxxp"):
+        val = "http" + val[4:]
     # Strip defanging
     val = val.replace("[.]", ".").replace("(.)", ".").replace("[:]", ":")
     det.ioc_value = val

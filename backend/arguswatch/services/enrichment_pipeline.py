@@ -68,7 +68,7 @@ async def enrich_detection(detection_id: int) -> dict:
                 results["virustotal"] = vt
                 db.add(Enrichment(detection_id=det.id, provider="virustotal",
                     enrichment_type="reputation", data=vt,
-                    risk_score=vt.get("malicious", 0) / max(sum(vt.values() if isinstance(vt, dict) else [1]), 1)))
+                    risk_score=vt.get("malicious", 0) / max(sum(v for v in vt.values() if isinstance(v, (int, float))), 1)))
                 if vt.get("malicious", 0) > 20 and det.severity != SeverityLevel.CRITICAL:
                     det.severity = SeverityLevel.HIGH
                     det.confidence = min(1.0, det.confidence + 0.15)

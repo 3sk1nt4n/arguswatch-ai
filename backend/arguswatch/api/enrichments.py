@@ -107,7 +107,7 @@ async def create_remediation(req: RemediationCreate, db: AsyncSession = Depends(
             assigned_to = assigned_to or pb.assignee_role
     from datetime import datetime, timedelta
     from arguswatch.engine.severity_scorer import score as score_ioc
-    scored = score_ioc(det.ioc_type or "", det.ioc_type or "")
+    scored = score_ioc(det.source or "", det.ioc_type or "", det.confidence or 0.75)
     due_at = datetime.utcnow() + timedelta(hours=scored.sla_hours)
     action = RemediationAction(
         detection_id=req.detection_id, action_type=action_type,
