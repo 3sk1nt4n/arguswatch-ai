@@ -977,10 +977,10 @@ a{color:#e65c00!important;}
       <div class="ov-sev-seg low" id="ov-seg-low" style="width:0%;cursor:pointer;" onclick="drillSeverity('LOW').catch(e=>go('detections'))" title="Click to explore Low detections"></div>
     </div>
     <div class="ov-sev-legend">
-      <span class="ov-sev-dot" style="--dc:#c62828;" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='CRITICAL';loadDet();}},100);" title="Click to view Critical detections"><span class="ov-sev-ct" id="ov-ct-crit">0</span> Critical</span>
-      <span class="ov-sev-dot" style="--dc:#ef6c00;" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='HIGH';loadDet();}},100);" title="Click to view High detections"><span class="ov-sev-ct" id="ov-ct-high">0</span> High</span>
-      <span class="ov-sev-dot" style="--dc:#f9a825;" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='MEDIUM';loadDet();}},100);" title="Click to view Medium detections"><span class="ov-sev-ct" id="ov-ct-med">0</span> Medium</span>
-      <span class="ov-sev-dot" style="--dc:var(--green);" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='LOW';loadDet();}},100);" title="Click to view Low detections"><span class="ov-sev-ct" id="ov-ct-low">0</span> Low</span>
+      <span class="ov-sev-dot" style="--dc:#c62828;" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='CRITICAL';loadD();}},100);" title="Click to view Critical detections"><span class="ov-sev-ct" id="ov-ct-crit">0</span> Critical</span>
+      <span class="ov-sev-dot" style="--dc:#ef6c00;" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='HIGH';loadD();}},100);" title="Click to view High detections"><span class="ov-sev-ct" id="ov-ct-high">0</span> High</span>
+      <span class="ov-sev-dot" style="--dc:#f9a825;" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='MEDIUM';loadD();}},100);" title="Click to view Medium detections"><span class="ov-sev-ct" id="ov-ct-med">0</span> Medium</span>
+      <span class="ov-sev-dot" style="--dc:var(--green);" onclick="go('detections');setTimeout(()=>{const s=document.getElementById('det-sev');if(s){s.value='LOW';loadD();}},100);" title="Click to view Low detections"><span class="ov-sev-ct" id="ov-ct-low">0</span> Low</span>
     </div>
   </div>
 
@@ -2464,7 +2464,7 @@ async function loadDW(filter){
       <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
         ${d.customer_name?`<span style="padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(0,137,123,.06);color:var(--cyan);border:1px solid rgba(0,137,123,.12);cursor:pointer;" onclick="event.stopPropagation();openCu(${d.customer_id})">🏢 ${escHtml(d.customer_name)}</span>`:'<span style="font-size:11px;color:var(--text4);">Unattributed</span>'}
         ${d.threat_actor?`<span style="padding:3px 10px;border-radius:10px;font-size:11px;font-weight:700;background:rgba(198,40,40,.06);color:#c62828;border:1px solid rgba(198,40,40,.12);">🎭 ${escHtml(d.threat_actor)}</span>`:''}
-        ${d.url?`<span style="margin-left:auto;padding:3px 10px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(230,92,0,.06);color:var(--orange);border:1px solid rgba(230,92,0,.12);cursor:pointer;" onclick="event.stopPropagation();window.open('${d.url}','_blank')">🔗 Source</span>`:''}
+        ${d.url?`<span style="margin-left:auto;padding:3px 10px;border-radius:10px;font-size:10px;font-weight:600;background:rgba(230,92,0,.06);color:var(--orange);border:1px solid rgba(230,92,0,.12);cursor:pointer;" onclick="event.stopPropagation();window.open(decodeURIComponent('${encodeURIComponent(d.url)}'),'_blank')">🔗 Source</span>`:''}
       </div>
     </div>`;
   }).join('');

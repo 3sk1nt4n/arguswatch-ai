@@ -606,13 +606,6 @@ a{color:#e65c00!important;}
     <div class="sb-item" onclick="go('advisories')"><span class="ico">📢</span>Advisories</div>
     <div class="sb-item" onclick="go('unattributed')"><span class="ico">❓</span>Unattributed</div>
   </div>
-  <div class="sb-lbl">Compliance</div>
-  <div class="sb-sec">
-    <div class="sb-item" onclick="go('sla')"><span class="ico">⏱️</span>SLA</div>
-    <div class="sb-item" onclick="go('fppatterns')"><span class="ico">🧠</span>FP Patterns</div>
-    <div class="sb-item" onclick="go('advisories')"><span class="ico">📢</span>Advisories</div>
-    <div class="sb-item" onclick="go('unattributed')"><span class="ico">❓</span>Unattributed</div>
-  </div>
   <div style="margin-top:auto;padding:12px;border-top:1px solid var(--border);">
     <div style="font-size:12px;color:var(--text4);text-align:center;">
       <span style="color:#2e7d32;font-weight:700;">●</span> System Online<br>
@@ -1261,7 +1254,7 @@ async function loadCa(){
   const grid=document.getElementById('ca-grid');
   document.getElementById('ca-empty').style.display=items.length?'none':'block';
   grid.innerHTML=items.map(c=>`
-    <div class="card" style="cursor:pointer;" onclick="openCaDetail(${c.id})">
+    <div class="card" style="cursor:pointer;" onclick="openCaDetail(${c.id})" role="button">
       <div class="flex gap-8 mb-12">${sevTag(c.severity||'high')}<span class="text-xs text-muted">#${c.id}</span></div>
       <div class="font-bold mb-12">${c.name||c.title||'Campaign #'+c.id}</div>
       <div class="text-sm text-muted mb-12">${c.ai_narrative||c.narrative||c.description||'AI-correlated attack pattern'}</div>
@@ -1392,7 +1385,7 @@ async function loadDW(filter){
       <div class="dw-foot">
         ${d.customer_name?`<span class="dw-cust">👤 ${d.customer_name}</span>`:'<span style="font-size:12px;color:var(--text4);">Unattributed</span>'}
         ${d.threat_actor?`<span class="dw-actor">🎭 ${d.threat_actor}</span>`:''}
-        ${d.url?`<span class="fi-pill type" style="cursor:pointer;margin-left:auto;" onclick="window.open('${d.url}','_blank')">🔗 Source</span>`:''}
+        ${d.url?`<span class="fi-pill type" style="cursor:pointer;margin-left:auto;" onclick="window.open(decodeURIComponent('${encodeURIComponent(d.url)}'),'_blank')">🔗 Source</span>`:''}
       </div>
     </div>`;
   }).join('')||'<div class="empty">No dark web intelligence found for this filter</div>';
@@ -1438,6 +1431,34 @@ async function loadCust(){
       </div>
     </div>`).join('')||'<div class="empty">No customers yet. Click <b>+ Onboard</b> to add your first customer.</div>';
 }
+
+// ═══ CAMPAIGN DETAIL ═══
+async function openCaDetail(id){
+  const c=await api('/api/campaigns/'+id);
+  if(!c)return;
+  const findings=c.findings||[];
+  let h=`<div class="card" style="margin-bottom:16px;">
+    <div class="flex gap-8 mb-12">${sevTag(c.severity||'high')}<span class="mono text-sm">#${c.id}</span></div>
+    <div class="font-bold mb-8" style="font-size:16px;">${escHtml(c.name||c.title||'Campaign #'+c.id)}</div>
+    <div class="text-sm text-muted mb-12">${escHtml(c.ai_narrative||c.narrative||c.description||'')}</div>
+    <div class="flex gap-8 flex-wrap">
+      <span class="tag info">${findings.length} findings</span>
+      ${c.actor_names?'<span class="tag high">'+escHtml(Array.isArray(c.actor_names)?c.actor_names.join(', '):c.actor_names)+'</span>':''}
+      ${c.kill_chain_phase?'<span class="tag">'+escHtml(c.kill_chain_phase)+'</span>':''}
+    </div></div>`;
+  if(findings.length){
+    h+='<div class="font-bold mb-8">Related Findings</div>';
+    findings.forEach(f=>{
+      h+=`<div class="card" style="padding:10px;margin-bottom:6px;cursor:pointer;" onclick="openFi(${f.id||f.finding_id})">
+        ${sevTag(f.severity||'medium')} <span class="mono text-sm">${escHtml(f.ioc_value||'')}</span>
+        <span class="text-muted text-sm"> - ${escHtml(f.customer_name||'')}</span></div>`;
+    });
+  }
+  document.getElementById('mf-title').textContent='Campaign #'+id;
+  document.getElementById('mf-body').innerHTML=h;
+  openM('m-finding');
+}
+function escHtml(s){if(!s)return'';return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
 // ═══ CUSTOMER DETAIL ═══
 async function openCu(id){
